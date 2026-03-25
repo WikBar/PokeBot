@@ -1,0 +1,12 @@
+{
+  "region":"Unova",
+  "adventureNr":1,
+  "pokemonIndex":0,
+  "sellablePokemon": ["Zubat","Magikarp","Pidgey","Rattata","Weedle","Caterpie","Spearow","Ekans","Poliwag","Abra",
+"Machop","Gastly","Drowzee","Krabby","Horsea","Staryu","Sunkern","Hoothoot","Ledyba","Spinarak","Chinchou","Hoppip","Aipom","Slugma","Houndour","Mareep",
+"Dunsparce","Snubbull","Aipom","Wooper","Phanpy","Remoraid","Marill","Natu","Skitty","Lotad",
+"Zigzagoon","Wurmple","Taillow","Seedot","Volbeat","Wingull","Ralts","Pineco","Sentret",
+"Cyndaquil","Feebas","Corphish","Barboach","Carvanha","Spheal","Numel","Luvdisc","Clamperl","Spoink","Trapinch","Whismur","Mudkip",
+"Baltoy","Tropius","Cacnea","Spinda","Gulpin","Illumise","Nincada","Kirlia","Lombre","Poochyena",
+"Mightyena","Surskit","Shroomish","Makuhita","Sewaddle","Pidove","Lillipup","Bellsprout","Oddish"]
+}
