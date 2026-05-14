@@ -23,15 +23,15 @@ async function SellPokemon(page, pokemonToSell) {
   // TOP 5 najliczniejszych pokemonów w zbiorze (na podstawie tekstów w hodowli)
   const extractName = (raw) => {
     const firstLine = String(raw || '').split('\n')[0].trim();
-    // usuń typowe dodatki (poziom/level/płeć/znaki), zostaw możliwie samą nazwę
     const cleaned = firstLine
       .replace(/\s{2,}/g, ' ')
       .replace(/♀|♂/g, '')
       .replace(/[+>]/g, '')
-      .replace(/\b(poziom|lvl|lv)\b.*$/i, '')
+      .replace(/\d+\s*poz\b/gi, '')
+      .replace(/\b(poziom|lvl|lv)\s*\d+\b/gi, '')
+      .replace(/\b\d+\b/g, '')
       .replace(/\(.*\)$/g, '')
       .trim();
-    // jeśli po czyszczeniu zrobiło się pusto, wróć do surowego
     return cleaned.length ? cleaned : firstLine;
   };
 

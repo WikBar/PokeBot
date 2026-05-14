@@ -27,6 +27,21 @@ function ensureDir(dirPath) {
   }
 }
 
+function pruneOldLogs(logsDir, maxAgeDays = 3) {
+  try {
+    const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
+    for (const file of fs.readdirSync(logsDir)) {
+      if (!/\.(log|jsonl)$/.test(file)) continue;
+      const filePath = path.join(logsDir, file);
+      if (fs.statSync(filePath).mtimeMs < cutoff) {
+        fs.unlinkSync(filePath);
+      }
+    }
+  } catch {
+    // prune failure is non-critical
+  }
+}
+
 function getLogFilePath(now = new Date(), accountId) {
   const dateKey = now.toISOString().slice(0, 10);
   const suffix = accountId ? `-${accountId}` : '';
@@ -80,9 +95,15 @@ function createLogger(options = {}) {
       const logsDir = path.resolve(__dirname, '..', '..', 'logs');
       ensureDir(logsDir);
       fs.appendFileSync(getLogFilePath(new Date(), baseMeta.account), line + '\n', 'utf8');
+      if (Math.random() < 0.01) pruneOldLogs(logsDir);
     } catch (e) {
       console.error(formatLine('error', 'Logger file write failed', { error: String(e) }));
     }
+
+    try {
+      const state = require('../state');
+      state.addLog({ ts: new Date().toISOString(), level, message, meta: mergedMeta });
+    } catch { /* state not yet loaded */ }
   }
 
   function metric(name, value, meta) {

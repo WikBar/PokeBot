@@ -54,9 +54,9 @@
   },
   "Paldea": {
     "1": { "name": "Melancholijne Pola", "requiredPA": 10, "isSpecial": false },
-    "2": { "name": "Gąszcz Tagtree", "requiredPA": 15, "isSpecial": false },
-    "3": { "name": "Góra Glaseado", "requiredPA": 20, "isSpecial": false },
-    "4": { "name": "Jezioro Casseroya", "requiredPA": 10, "isSpecial": false },
+    "2": { "name": "Gąszcz Tagtree", "requiredPA": 10, "isSpecial": false },
+    "3": { "name": "Góra Glaseado", "requiredPA": 14, "isSpecial": false },
+    "4": { "name": "Jezioro Casseroya", "requiredPA": 15, "isSpecial": false },
     "5": { "name": "Pustynia Asado", "requiredPA": 20, "isSpecial": false },
     "6": { "name": "Strefa Zero", "requiredPA": 15, "isSpecial": true }
   }

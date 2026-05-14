@@ -27,34 +27,38 @@ async function GetTypes(page) {
 async function ClickAdventure(page, account, locations) {
   log.info(`Próba rozpoczęcia przygody ${account.adventureNr} w Regionie ${account.region}.`);
 
-  const statsVisible = await page.locator('div.panel-heading:has-text("Statystyki")').isVisible();
-  const activityVisible = await page.locator('div.panel-heading:has-text("Aktywność")').isVisible() ||
-                          await page.locator('div.panel-heading:has-text("Centrum")').isVisible();
-
-  const adventureHeader = statsVisible || activityVisible;
-
-  if (!adventureHeader) {
-    log.info("Brak aktywnej wyprawy – klikam 'Kontynuuj'");
-    await ClickContinue(page);
-    return;
-  }
-
-  const pokemonPanel = await page.$('div.panel-primary:has-text("Poziom")');
-  if (pokemonPanel) {
-    log.info("Wykryto Pokémona – pomijam kliknięcie 'Kontynuuj'");
-  }
   const region = locations[account.region];
-  const spotName = region[String(account.adventureNr)].name;
+  const spotName = region[String(account.adventureNr)]?.name;
   if (!spotName) {
     log.error("Niepoprawny numer przygody", { adventureNr: account.adventureNr, region: account.region });
     return;
   }
 
-  const linkRegex = spotName;
-  await page.getByRole('link', { name: linkRegex }).click();
-  await page.waitForLoadState('networkidle');
+  const statsVisible = await page.locator('div.panel-heading:has-text("Statystyki")').isVisible();
+  const activityVisible = await page.locator('div.panel-heading:has-text("Aktywność")').isVisible() ||
+                          await page.locator('div.panel-heading:has-text("Centrum")').isVisible();
+  const adventureActive = statsVisible || activityVisible;
 
-  log.info('Wyprawa zakończona', { location: String(linkRegex).replace(/\//g, "") });
+  if (adventureActive) {
+    await page.getByRole('link', { name: spotName }).click();
+    await page.waitForLoadState('networkidle');
+    log.info('Wyprawa kliknięta', { location: spotName });
+    return;
+  }
+
+  // Brak aktywnej wyprawy — strona główna / lista lokacji
+  if (account.adventureChanged) {
+    log.info("Zmiana wyprawy wykryta – pomijam 'Kontynuuj', klikam nową lokację.");
+    account.adventureChanged = false;
+  } else {
+    log.info("Brak aktywnej wyprawy – klikam 'Kontynuuj'");
+    await ClickContinue(page);
+    return;
+  }
+
+  await page.getByRole('link', { name: spotName }).click();
+  await page.waitForLoadState('networkidle');
+  log.info('Wyprawa kliknięta', { location: spotName });
 }
 
 async function CheckIfPokemon(page) {
@@ -67,7 +71,8 @@ async function CheckIfPokemon(page) {
     pokemonInfo.pokemon = String(textContent || '').split('\n').map(s => s.trim()).find(s => s.length > 0) || '';
     pokemonInfo.level = await GetLevel(page);
     pokemonInfo.types = await GetTypes(page);
-    log.info(`Pokemon info: ${pokemonInfo.pokemon} Poziom: ${pokemonInfo.level} Typy: ${pokemonInfo.types?.join(', ')}`);
+    pokemonInfo.catchDiff = await checkCatchingDiff(page);
+    log.info(`Pokemon info: ${pokemonInfo.pokemon} Poziom: ${pokemonInfo.level} Typy: ${pokemonInfo.types?.join(', ')} Trudność łapania: ${pokemonInfo.catchDiff}/5`);
   } else {
     log.debug('Pokemon nie został znaleziony.');
     pokemonInfo.isPokemon = false;
@@ -91,8 +96,14 @@ async function CatchPokemon(page, pokemon, regionInfo) {
   const LvlBallMinLvl = 40;
   const time = new Date().getHours();
 
-  if (regionInfo.isGoldenNest) {
-    await ClickXBall(page, Pokeballe.ultraball);
+  if (pokemon.catchDiff === 1 && pokemon.level < 13) {
+    await ClickXBall(page, Pokeballe.pokeball);
+  } else if (pokemon.catchDiff === 2 && pokemon.level < 30) {
+    await ClickXBall(page, Pokeballe.friendball);
+  } else if (pokemon.catchDiff >= 4 && pokemon.level < 70) {
+    await ClickXBall(page, Pokeballe.ultraball );
+  } else if (regionInfo.isGoldenNest || pokemon.level >75) {
+    await ClickXBall(page, Pokeballe.cherishball);
   } else if (regionInfo.isSpecial) {
     await ClickXBall(page, Pokeballe.safariball);
   } else if ((time >= 18 || time < 6) && pokemon.level >= NestBallMaxLvl && pokemon.level < LvlBallMinLvl) {
@@ -117,9 +128,24 @@ async function ClickXBall(page, pokeball) {
   }
 }
 
+async function checkCatchingDiff(page) {
+  const pokeballs = await page.$$('div.col-xs-12.col-md-8 img');
+  let filteredCount = 0;
+  for (const ball of pokeballs) {
+    const style = await ball.getAttribute('style');
+    if (style && (style.includes('grayscale') || style.includes('opacity(0.3)'))) {
+      filteredCount++;
+    }
+  }
+  const diff = Math.max(1, Math.min(5, 5 - filteredCount));
+  log.debug(`Trudność łapania: ${diff} (${filteredCount} pokeballi wyszarzonych)`);
+  return diff;
+}
+
 module.exports = {
   ClickAdventure,
   CheckIfPokemon,
   ClickPokemon,
-  CatchPokemon
+  CatchPokemon,
+  checkCatchingDiff
 };

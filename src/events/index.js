@@ -59,18 +59,21 @@ async function CheckActivity(page){
     try{
         const InfoPanels = await page.$$(`div.alert.alert-info.text-center`);
             for (const panel of InfoPanels) {
-    
+
         const alertText = await page.evaluate(element => element.textContent, panel);
-        if (alertText.includes("Jesteś w trakcie")){
+        if (alertText.includes("Jesteś w trakcie Opieki")){
+            log.info("Jesteś w trakcie Opieki");
+            return 'care';
+        } else if (alertText.includes("Jesteś w trakcie")){
             log.info("Jesteś w trakcie aktywności");
-            return true
+            return true;
         }else{
             log.debug(alertText);
             continue;
         }
         }
         return false
-    
+
 }catch(e)
     {log.warn("Błąd wykrywania aktywności", { error: String(e) })}
 }

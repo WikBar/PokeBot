@@ -17,6 +17,8 @@ async function ClickHospital(page) {
   log.info("Udano się do Centrum Pokemon");
   await page.locator('button', { hasText: 'Uzupełnij za' }).click();
   log.info("HP zostało uzupełnione do 100%");
+  const hpResult = await CheckHP(page);
+  return hpResult;
 }
 
 async function EatRawstBerry(page) {

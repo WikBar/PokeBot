@@ -1,6 +1,6 @@
 require('dotenv').config(); // Wczytujemy login i hasło z pliku .env
 const { chromium } = require('playwright'); // Importujemy przeglądarkę
-const { CheckPA, ClickAdventure, CheckIfPokemon,
+const { CheckPA, CheckStorage, ClickAdventure, CheckIfPokemon,
    CatchPokemon, ClickPokemon,
    CancelActivity, StartActivity,
    CheckHP, ClickHospital,
@@ -8,8 +8,10 @@ const { CheckPA, ClickAdventure, CheckIfPokemon,
 const { loadFromFile, saveToFile } = require('./utils/fileOperations');
 const { CheckIfGoodEvent,CheckIfBadEvent, CheckActivity}=require('./events');
 const path = require('path');
-const { runDailyActions } = require('./dailyActions');
+const { runDailyActions, runAssociationPAIfNeeded, runPABerriesIfNeeded } = require('./dailyActions');
 const { logger } = require('./utils/logger');
+const { startServer } = require('./server');
+const state = require('./state');
 
 const log = logger.child({ module: 'main' });
 
@@ -49,7 +51,17 @@ const REGEN_ITERATIONS = 10;
     return;
   }
 
+  startServer();
+
 while (true){
+  if (state.getState().emergencyStop) {
+    log.warn('Emergency stop via API');
+    break;
+  }
+  while (state.getState().isPaused) {
+    log.info('Bot paused via API, waiting...');
+    await page.waitForTimeout(5000);
+  }
   try {
     if (!(await isSessionAlive(page))) {
       log.warn('Sesja wygasła, ponawiam logowanie...');
@@ -59,7 +71,9 @@ while (true){
         break;
       }
     }
-  const accountConfig= await loadFromFile(configPath);
+  const storageResult = await CheckStorage(page);
+  state.updateStats({ storage: { current: storageResult.current, max: storageResult.max } });
+  let accountConfig = await loadFromFile(configPath);
   if (process.env.POKE_ADVENTURE_NR) {
     const parsedAdventureNr = parseInt(process.env.POKE_ADVENTURE_NR, 10);
     if (!Number.isNaN(parsedAdventureNr)) {
@@ -68,6 +82,7 @@ while (true){
       log.warn("Niepoprawna wartość POKE_ADVENTURE_NR, używam wartości z config.json");
     }
   }
+  state.updateStats({ region: accountConfig.region, adventureNr: accountConfig.adventureNr });
   log.info(`Załadowana konfiguracja: Region ${accountConfig.region}, Atakujący pokemon ${accountConfig.pokemonIndex + 1}, Numer przygody ${accountConfig.adventureNr}`);
   const region=locations[accountConfig.region];
   const locationKey = String(accountConfig.adventureNr);
@@ -76,39 +91,91 @@ while (true){
   await runDailyActions(page);
   await SellPokemon(page, accountConfig.sellablePokemon);
 
-  if( (await CheckPA(page)).currentPA > locationInfo.requiredPA + paBuffer ){
-    if (await CheckActivity(page)){
+  let paResult = await CheckPA(page);
+  state.updateStats({ pa: { current: paResult.currentPA, max: paResult.maxPA } });
+  if (paResult.currentPA > locationInfo.requiredPA + paBuffer) {
+    const activityActive = await CheckActivity(page);
+    state.updateStats({ activity: { active: !!activityActive } });
+    if (activityActive === 'care') {
+      log.info('Wykryto aktywną Opiekę - przekazuję do dailyActions.');
+      await runDailyActions(page);
+    } else if (activityActive) {
       await CancelActivity(page);
     }
 
-  while ((await CheckPA(page)).currentPA >= locationInfo.requiredPA + paBuffer){
+  paResult = await CheckPA(page);
+  state.updateStats({ pa: { current: paResult.currentPA, max: paResult.maxPA } });
+  while (paResult.currentPA >= locationInfo.requiredPA + paBuffer){
     log.info("Wystarczająca ilość PA");
 
-    if ((await CheckHP(page)).currentHP < HP_THRESHOLD){
+    const hpResult = await CheckHP(page);
+    state.updateStats({ hp: { current: hpResult.currentHP, max: hpResult.maxHP } });
+    if (hpResult.currentHP < HP_THRESHOLD){
       log.warn("Niskie HP, idę do Centrum Pokemon");
-      await ClickHospital(page);
+      const hpAfterHospital = await ClickHospital(page);
+      state.updateStats({ hp: { current: hpAfterHospital.currentHP, max: hpAfterHospital.maxHP } });
     }
     
+    state.updateStats({ lastEvent: 'adventure_started' });
     await ClickAdventure(page,accountConfig,locations);
 
     await CheckIfGoodEvent(page)
     await CheckIfBadEvent(page)
     const pokemonInfo= await CheckIfPokemon(page);
       if (pokemonInfo.isPokemon){
-        if (pokemonInfo.level>45){
+        if (pokemonInfo.catchDiff <= 2 && pokemonInfo.pokemon && !accountConfig.sellablePokemon.includes(pokemonInfo.pokemon)) {
+          accountConfig.sellablePokemon.push(pokemonInfo.pokemon);
+          await saveToFile(configPath, accountConfig);
+          log.info(`Dodano do sellablePokemon (trudność ${pokemonInfo.catchDiff}): ${pokemonInfo.pokemon}`);
+        }
+
+        if (pokemonInfo.level>50){
             await ClickPokemon(page,accountConfig.pokemonIndex);
         }else{
-          await ClickPokemon(page,0);
+          await ClickPokemon(page,accountConfig.SecondPokemonIndex);
         }
 
         if (await CheckIfGoodEvent(page)==3){
           await CatchPokemon(page,pokemonInfo,locationInfo);
+          state.updateStats({ lastEvent: 'pokemon_caught' });
           }
 
       }else{
         log.info("Brak Pokemona na przygodzie");
       }
       await page.waitForTimeout(ADVENTURE_TIMEOUT);
+      paResult = await CheckPA(page);
+      state.updateStats({ pa: { current: paResult.currentPA, max: paResult.maxPA } });
+
+      while (state.getState().isPaused) {
+        log.info('Bot paused via API, waiting...');
+        await new Promise(resolve => setTimeout(resolve, 5000));
+      }
+      if (state.getState().emergencyStop) {
+        log.warn('Emergency stop via API');
+        process.exit(0);
+      }
+      if (state.getState().forceHospital) {
+        log.info('Force hospital via API');
+        const hpAfterForce = await ClickHospital(page);
+        state.updateStats({ hp: { current: hpAfterForce.currentHP, max: hpAfterForce.maxHP } });
+        state.setForceHospital(false);
+      }
+
+      const prevAdventureNr = accountConfig.adventureNr;
+      accountConfig = await loadFromFile(configPath);
+      if (process.env.POKE_ADVENTURE_NR) {
+        const parsedAdventureNr = parseInt(process.env.POKE_ADVENTURE_NR, 10);
+        if (!Number.isNaN(parsedAdventureNr)) accountConfig.adventureNr = parsedAdventureNr;
+      }
+      if (accountConfig.adventureNr !== prevAdventureNr) {
+        log.info(`Zmiana wyprawy: ${prevAdventureNr} → ${accountConfig.adventureNr} - flaga adventureChanged ustawiona.`);
+        accountConfig.adventureChanged = true;
+      }
+      state.updateStats({ region: accountConfig.region, adventureNr: accountConfig.adventureNr });
+
+      await runAssociationPAIfNeeded(page);
+      await runPABerriesIfNeeded(page);
     }
     }
     if (accountConfig.randomAdventure) {
@@ -122,12 +189,18 @@ while (true){
       log.info(`randomAdventure: następna lokacja → ${accountConfig.adventureNr} (${nonSpecial[nextIdx][1].name})`);
     }
 
-    if (await CheckActivity(page)==false && (await CheckPA(page)).currentPA<locationInfo.requiredPA){
+    const activityCheck = await CheckActivity(page);
+    state.updateStats({ activity: { active: !!activityCheck } });
+    const paCheck = await CheckPA(page);
+    state.updateStats({ pa: { current: paCheck.currentPA, max: paCheck.maxPA } });
+    if (activityCheck === false && paCheck.currentPA < locationInfo.requiredPA){
       await StartActivity(page);
+      state.updateStats({ activity: { active: true } });
     }
     await page.reload();
     log.info("Czekam na odnowienie punktów akcji");
-
+    state.updateStats({ lastEvent: 'waiting_for_pa_regen' });
+    await SellPokemon(page, accountConfig.sellablePokemon);
     for (let i = 0; i < REGEN_ITERATIONS; i++){
         await page.waitForTimeout(REGEN_WAIT_MINUTES * 60 * 1000);
         await page.reload();
