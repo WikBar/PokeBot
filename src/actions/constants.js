@@ -2,6 +2,7 @@ const Pokeballe = {
   pokeball: "pokeballe",
   nestball: "nestballe",
   greatball: "greatballe",
+  ultraball: "ultraballe",
   nightball: "nightballe",
   levelball: "levelballe",
   safariball: "safariballe"

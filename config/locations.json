@@ -26,6 +26,14 @@
     "6": { "name": "Nawiedzona Wieża", "requiredPA": 15, "isSpecial": false  },
     "7": { "name": "Meteorytowa Góra", "requiredPA": 15, "isSpecial": true}
   },
+  "Sinnoh": {
+    "1": { "name": "Gęsty Zagajnik", "requiredPA": 10 , "isSpecial": false },
+    "2": { "name": "Dolina Wiatraków", "requiredPA": 15 , "isSpecial": false },
+    "3": { "name": "Koronny Szczyt", "requiredPA": 12, "isSpecial": false },
+    "4": { "name": "Portójny Staw", "requiredPA": 10 , "isSpecial": false },
+    "5": { "name": "Pustynia Lodowa", "requiredPA": 20, "isSpecial": false  },
+    "6": { "name": "Wielkie Bagna", "requiredPA": 15, "isSpecial": true  }
+  },
   "Unova": {
     "1": { "name": "Ranczo", "requiredPA": 9 , "isSpecial": false },
     "2": { "name": "Most Zwodzony Driftveil", "requiredPA": 9 , "isSpecial": false },
@@ -35,5 +43,21 @@
     "6": { "name": "Wiejski Most", "requiredPA": 12, "isSpecial": false  },
     "7": { "name": "Jaskinia Elektrokamieni", "requiredPA": 9, "isSpecial": false  },
     "8": { "name": "Reliktowy Zamek", "requiredPA": 14, "isSpecial": true}
+  },
+  "Alola": {
+    "1": { "name": "Wzgórze Strumyków", "requiredPA": 9 , "isSpecial": false },
+    "2": { "name": "Bujna Dżungla", "requiredPA": 14 , "isSpecial": false },
+    "3": { "name": "Plaża Wielkiej Fali", "requiredPA": 10 , "isSpecial": false },
+    "4": { "name": "Wulkaniczny Park", "requiredPA": 13, "isSpecial": false  },
+    "5": { "name": "Wielki Kanion Poni", "requiredPA": 13, "isSpecial": false  },
+    "6": { "name": "Góra Lanakila", "requiredPA": 20, "isSpecial": true}
+  },
+  "Paldea": {
+    "1": { "name": "Melancholijne Pola", "requiredPA": 10, "isSpecial": false },
+    "2": { "name": "Gąszcz Tagtree", "requiredPA": 15, "isSpecial": false },
+    "3": { "name": "Góra Glaseado", "requiredPA": 20, "isSpecial": false },
+    "4": { "name": "Jezioro Casseroya", "requiredPA": 10, "isSpecial": false },
+    "5": { "name": "Pustynia Asado", "requiredPA": 20, "isSpecial": false },
+    "6": { "name": "Strefa Zero", "requiredPA": 15, "isSpecial": true }
   }
 }

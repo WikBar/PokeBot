@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell([System.Environment]::GetEnvironmentVariable\\(\"PATH\", \"Machine\"\\) -split \";\" | Select-String -Pattern \"node|nvm|fnm|volta\" -SimpleMatch)",
+      "PowerShell(cmd /c \"node --version\" 2>&1)",
+      "PowerShell(Get-Process -Name \"node\" -ErrorAction SilentlyContinue)"
+    ]
+  }
+}

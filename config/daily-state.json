@@ -1,0 +1,10 @@
+{
+  "dayKey": "2026-05-09",
+  "actions": {
+    "lottery": true,
+    "farm": true,
+    "pokemonCare": true,
+    "associationPA": true,
+    "paBerries": true
+  }
+}

@@ -3,6 +3,7 @@ const { ClickContinue, CancelActivity, StartActivity } = require('./activity');
 const { CheckHP, ClickHospital, EatRawstBerry } = require('./health');
 const { CheckPA } = require('./stats');
 const { SellPokemon } = require('./pokemon');
+const { login, isSessionAlive } = require('./auth');
 
 module.exports = {
   ClickAdventure,
@@ -16,5 +17,7 @@ module.exports = {
   ClickHospital,
   EatRawstBerry,
   CheckPA,
-  SellPokemon
+  SellPokemon,
+  login,
+  isSessionAlive
 };

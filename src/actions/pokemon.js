@@ -1,12 +1,15 @@
 const { SELL_THRESHOLD, MAX_SELL_CLICK, CLICK_DELAY } = require('./constants');
+const { logger } = require('../utils/logger');
+
+const log = logger.child({ module: 'pokemon' });
 
 async function SellPokemon(page, pokemonToSell) {
   if (!Array.isArray(pokemonToSell) || pokemonToSell.length === 0) {
-    console.log("Brak listy pokemonów do sprzedaży.");
+    log.info("Brak listy pokemonów do sprzedaży.");
     return;
   }
   await page.getByRole('img', { name: 'Sprzedaj Pokemony z Przechowalni' }).click();
-  console.log("Jesteś w Hodowli Pokemonów");
+  log.info("Jesteś w Hodowli Pokemonów");
   await page.waitForSelector('label.btn-hodowla', { timeout: 10000 });
 
   const buttons = page.locator('label.btn-hodowla');
@@ -16,6 +19,35 @@ async function SellPokemon(page, pokemonToSell) {
   const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
   const texts = await buttons.allInnerTexts();
+
+  // TOP 5 najliczniejszych pokemonów w zbiorze (na podstawie tekstów w hodowli)
+  const extractName = (raw) => {
+    const firstLine = String(raw || '').split('\n')[0].trim();
+    // usuń typowe dodatki (poziom/level/płeć/znaki), zostaw możliwie samą nazwę
+    const cleaned = firstLine
+      .replace(/\s{2,}/g, ' ')
+      .replace(/♀|♂/g, '')
+      .replace(/[+>]/g, '')
+      .replace(/\b(poziom|lvl|lv)\b.*$/i, '')
+      .replace(/\(.*\)$/g, '')
+      .trim();
+    // jeśli po czyszczeniu zrobiło się pusto, wróć do surowego
+    return cleaned.length ? cleaned : firstLine;
+  };
+
+  const counts = new Map();
+  for (const t of texts) {
+    const name = extractName(t);
+    counts.set(name, (counts.get(name) || 0) + 1);
+  }
+
+  const top5 = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([name, count]) => ({ name, count }));
+
+  log.info(`TOP 5 najliczniejszych pokemonów w zbiorze: ${top5.map(t => `${t.name} (${t.count})`).join(', ')}`);
+
   const matchedIndexes = [];
   const seenTypes = new Set();
 
@@ -26,12 +58,12 @@ async function SellPokemon(page, pokemonToSell) {
         matchedIndexes.push(i);
       } else {
         seenTypes.add(matchedName);
-        console.log(`Zachowuję jednego: ${matchedName}`);
       }
     }
   }
 
-  console.log(`Dopasowane do sprzedaży: ${matchedIndexes.length} (zachowano po 1 z każdego typu)`);
+  log.info(`Zachowuję po jednym: ${[...seenTypes].join(', ')}`);
+  log.info(`Dopasowane do sprzedaży ${matchedIndexes.length} pokemonów`);
 
   if (matchedIndexes.length > SELL_THRESHOLD) {
     let clicked = 0;
@@ -43,15 +75,15 @@ async function SellPokemon(page, pokemonToSell) {
         break;
       }
     }
-    console.log("Pokemony zaznaczone do sprzedaży");
+    log.info("Pokemony zaznaczone do sprzedaży");
     await page.click('text=Sprzedaj Zaznaczone');
-    console.log("✅ Kliknięto przycisk 'Sprzedaj Zaznaczone");
+    log.info("Kliknięto 'Sprzedaj Zaznaczone'");
     await page.click('text=Potwierdź');
-    console.log("✅ Kliknięto przycisk 'Potwierdź' sprzedaż Pokemonów, sprzedano Pokemony.");
+    log.info("Potwierdzono sprzedaż Pokemonów");
     await page.waitForTimeout(2000);
     await page.reload();
   } else {
-    console.log("Za mało pokemonów do sprzedaży – pomijam");
+    log.info("Za mało pokemonów do sprzedaży – pomijam");
     await page.reload();
     return;
   }

@@ -1,16 +1,20 @@
+const { logger } = require('../utils/logger');
+
+const log = logger.child({ module: 'activity' });
+
 async function ClickContinue(page) {
   await page.click('button:has-text("Kontynuuj")');
-  console.log("✅ Kliknięto przycisk 'Kontynuuj'");
+  log.info("Kliknięto 'Kontynuuj'");
 }
 
 async function ClickButtonToActivity(page) {
   await page.click('text=Przejdź do Aktywności');
-  console.log("✅ Kliknięto przycisk 'Przejdź do aktywności'");
+  log.info("Kliknięto 'Przejdź do aktywności'");
 }
 
 async function ClickCancelActivity(page) {
   await page.click('text=Zakończ');
-  console.log("✅ Kliknięto przycisk 'Zakończono aktywność'");
+  log.info("Kliknięto 'Zakończ'");
 }
 
 async function CancelActivity(page) {
@@ -19,26 +23,45 @@ async function CancelActivity(page) {
     const alertText = await page.evaluate(element => element.textContent, panel);
 
     if (alertText.includes("Jesteś w trakcie")) {
-      console.log("Jesteś podczas aktywności którą trzeba anulować");
+      log.info("Aktywność wykryta - anuluję");
       await ClickButtonToActivity(page);
-      await page.waitForTimeout(2000);
+      try {
+        await page.waitForLoadState('networkidle', { timeout: 5000 });
+      } catch {
+        // nawigacja może być szybka lub już zakończona
+      }
       await ClickCancelActivity(page);
-      console.log("Aktywnosć została pomyślnie anulowana.");
+      log.info("Aktywność anulowana");
       return true;
     }
   }
+  return false;
+}
+
+async function verifyActivityStarted(page) {
+  try {
+    await page.waitForLoadState('networkidle', { timeout: 5000 });
+    const panels = await page.$$('div.alert.alert-info.text-center');
+    for (const panel of panels) {
+      const text = await page.evaluate(el => el.textContent, panel);
+      if (text.includes("Jesteś w trakcie")) return true;
+    }
+  } catch {
+    // ignore
+  }
+  return false;
 }
 
 async function StartActivity(page) {
   await page.click('a.dropdown-toggle');
   await page.click('ul.dropdown-menu >> text=Aktywność');
-  console.log("🤸🏼Kliknięto zakładkę aktywności");
+  log.info("Kliknięto zakładkę aktywności");
   await page.waitForTimeout(1000);
   await page.hover('button:has-text("Pracuj")');
   await page.click('a[href="#aktywnosc-trening"]');
   await page.click('button:has-text("Trenuj")');
   await page.click('button:has-text("Wybierz")');
-  console.log(" 💼🛠️ Rozpoczęto aktywność oraz oczekiwanie 2 godziny");
+  log.info("Rozpoczęto aktywność (2h)");
 }
 
 module.exports = {
@@ -46,5 +69,6 @@ module.exports = {
   ClickButtonToActivity,
   ClickCancelActivity,
   CancelActivity,
-  StartActivity
+  StartActivity,
+  verifyActivityStarted
 };
