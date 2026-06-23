@@ -3,7 +3,7 @@ const { logger } = require('../utils/logger');
 
 const log = logger.child({ module: 'pokemon' });
 
-async function SellPokemon(page, pokemonToSell) {
+async function SellPokemon(page, pokemonToSell, diff3Pokemons = []) {
   if (!Array.isArray(pokemonToSell) || pokemonToSell.length === 0) {
     log.info("Brak listy pokemonów do sprzedaży.");
     return;
@@ -58,6 +58,30 @@ async function SellPokemon(page, pokemonToSell) {
         matchedIndexes.push(i);
       } else {
         seenTypes.add(matchedName);
+      }
+    }
+  }
+
+  // Pokemony diff3: sprzedajemy wszystkie nadwyżki powyżej 7 sztuk danego gatunku
+  const diff3List = Array.isArray(diff3Pokemons) ? diff3Pokemons : [];
+  if (diff3List.length > 0) {
+    const diff3Counts = new Map();
+    for (let i = 0; i < texts.length; i++) {
+      const matchedName = diff3List.find(name => new RegExp(escapeRegExp(name)).test(texts[i]));
+      if (matchedName) {
+        const current = diff3Counts.get(matchedName) || { count: 0, indexes: [] };
+        current.count++;
+        current.indexes.push(i);
+        diff3Counts.set(matchedName, current);
+      }
+    }
+    for (const [name, { count, indexes }] of diff3Counts) {
+      if (count > 7) {
+        const toSell = indexes.slice(7);
+        log.info(`diff3: ${name} ma ${count} sztuk – sprzedaję ${toSell.length} nadwyżek`);
+        for (const idx of toSell) {
+          matchedIndexes.push(idx);
+        }
       }
     }
   }

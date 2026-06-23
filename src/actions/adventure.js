@@ -102,6 +102,8 @@ async function CatchPokemon(page, pokemon, regionInfo) {
     await ClickXBall(page, Pokeballe.friendball);
   } else if (pokemon.catchDiff >= 4 && pokemon.level < 70) {
     await ClickXBall(page, Pokeballe.ultraball );
+   }else if (pokemon.types[0] === "Wróżkowy" && pokemon.types[1] === "Stalowy") {
+      await ClickXBall(page, Pokeballe.lureball );
   } else if (regionInfo.isGoldenNest || pokemon.level >75) {
     await ClickXBall(page, Pokeballe.cherishball);
   } else if (regionInfo.isSpecial) {

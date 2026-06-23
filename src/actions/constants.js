@@ -7,7 +7,8 @@ const Pokeballe = {
   levelball: "levelballe",
   safariball: "safariballe",
   friendball: "friendballe",
-  cherishball: "cherishballe"
+  cherishball: "cherishballe",
+  lureball: "lureballe"
 };
 
 const SELL_THRESHOLD = 20;

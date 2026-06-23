@@ -1,10 +1,11 @@
 {
-  "region": "Paldea",
-  "adventureNr": 1,
+  "region": "Unova",
+  "adventureNr": 7,
   "randomAdventure": false,
   "pokemonIndex": 0,
   "SecondPokemonIndex": 1,
   "paBuffer": 0,
+  "secondPokMaxLv": 80,
   "sellablePokemon": [
     "Zubat",
     "Magikarp",
@@ -150,6 +151,48 @@
     "Kingambit",
     "Scovillain",
     "Brambleghast",
-    "Gholdengo"
-  ]
+    "Gholdengo",
+    "Maschiff",
+    "Tadbulb",
+    "Charcadet",
+    "Klawf",
+    "Varoom",
+    "Poltchageist",
+    "Bellibolt",
+    "Sinistcha",
+    "Ceruledge",
+    "Archaludon",
+    "Armarouge",
+    "Annihilape",
+    "Shelmet",
+    "Frillish",
+    "Tympole",
+    "Basculin Red",
+    "Accelgor",
+    "Audino",
+    "Tirtouga",
+    "Blitzle",
+    "Woobat",
+    "Eelektross",
+    "Ferroseed",
+    "Joltik",
+    "Klink",
+    "Tynamo"
+  ],
+  "adventureChanged": false,
+  "diff3CatchPokemons": [
+    "Cubchoo",
+    "Palpitoad",
+    "Oshawott",
+    "Galvantula",
+    "Eelektrik",
+    "Drilbur",
+    "Boldore"
+  ],
+  "diff4CatchPokemons": [
+    "Zebstrika",
+    "Klang"
+  ],
+  "diff5CatchPokemons": [],
+  "diff0CatchPokemons": []
 }

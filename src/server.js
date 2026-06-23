@@ -10,10 +10,11 @@ const log = logger.child({ module: 'server' });
 
 const CONFIG_PATH = path.resolve(__dirname, '..', 'config', 'config.json');
 const DAILY_PATH  = path.resolve(__dirname, '..', 'config', 'daily-state.json');
+const TEAM_PATH   = path.resolve(__dirname, '..', 'config', 'team.json');
 
 const ALLOWED_CONFIG_KEYS = new Set([
   'region', 'adventureNr', 'randomAdventure',
-  'pokemonIndex', 'SecondPokemonIndex', 'paBuffer', 'sellablePokemon'
+  'pokemonIndex', 'SecondPokemonIndex', 'paBuffer', 'sellablePokemon', 'diff3CatchPokemons'
 ]);
 
 const API_KEY = process.env.API_KEY || null;
@@ -28,7 +29,7 @@ function requireApiKey(req, res, next) {
 
 function startServer() {
   const app = express();
-  const port = parseInt(process.env.WEB_PORT, 10) || 3001;
+  const port = parseInt(process.env.WEB_PORT, 10) || 4001;
 
   app.use(cors());
   app.use(express.json());
@@ -59,6 +60,29 @@ function startServer() {
   app.get('/api/daily', async (req, res) => {
     const daily = await loadFromFile(DAILY_PATH);
     res.json(daily);
+  });
+
+  app.get('/api/team', async (_req, res) => {
+    const team = await loadFromFile(TEAM_PATH);
+    res.json(team);
+  });
+
+  app.post('/api/team', async (req, res) => {
+    const { team } = req.body;
+    if (!Array.isArray(team) || team.length !== 6) {
+      return res.status(400).json({ ok: false, error: 'team must be an array of 6 entries' });
+    }
+    for (const slot of team) {
+      if (typeof slot.type1 !== 'string' || typeof slot.type2 !== 'string') {
+        return res.status(400).json({ ok: false, error: 'each slot must have type1 and type2 strings' });
+      }
+      if (slot.type1 && slot.type2 && slot.type1 === slot.type2) {
+        return res.status(400).json({ ok: false, error: `Pokemon nie może mieć 2 takich samych typów: ${slot.type1}` });
+      }
+    }
+    await saveToFile(TEAM_PATH, { team });
+    log.info('Team updated via API');
+    res.json({ ok: true, team });
   });
 
   app.get('/api/logs', (req, res) => {

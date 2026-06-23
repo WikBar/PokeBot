@@ -1,4 +1,4 @@
-require('dotenv').config(); // Wczytujemy login i hasło z pliku .env
+require('dotenv').config({ path: require('path').resolve(__dirname, '..', process.env.NODE_ENV === 'production' ? '.env.production' : '.env') }); // Wczytujemy login i hasło z pliku .env
 const { chromium } = require('playwright'); // Importujemy przeglądarkę
 const { CheckPA, CheckStorage, ClickAdventure, CheckIfPokemon,
    CatchPokemon, ClickPokemon,
@@ -8,7 +8,7 @@ const { CheckPA, CheckStorage, ClickAdventure, CheckIfPokemon,
 const { loadFromFile, saveToFile } = require('./utils/fileOperations');
 const { CheckIfGoodEvent,CheckIfBadEvent, CheckActivity}=require('./events');
 const path = require('path');
-const { runDailyActions, runAssociationPAIfNeeded, runPABerriesIfNeeded } = require('./dailyActions');
+const { runDailyActions, runCareIfNeeded, runAssociationPAIfNeeded, runPABerriesIfNeeded } = require('./dailyActions');
 const { logger } = require('./utils/logger');
 const { startServer } = require('./server');
 const state = require('./state');
@@ -44,6 +44,8 @@ const REGEN_ITERATIONS = 10;
   const context = await browser.newContext();
   const page = await context.newPage();
 
+  startServer();
+
   const loggedIn = await login(page, credentials);
   if (!loggedIn) {
     log.error('Logowanie nieudane. Sprawdź dane logowania w pliku .env.');
@@ -51,7 +53,36 @@ const REGEN_ITERATIONS = 10;
     return;
   }
 
-  startServer();
+async function categorizePokemon(pokemonInfo, accountConfig, configPath) {
+  if (!pokemonInfo.pokemon) return;
+  const diff = pokemonInfo.catchDiff;
+
+  const diffListMap = {
+    0: 'diff0CatchPokemons',
+    3: 'diff3CatchPokemons',
+    4: 'diff4CatchPokemons',
+    5: 'diff5CatchPokemons',
+  };
+
+  if (diff !== 0 && diff <= 2) {
+    if (!accountConfig.sellablePokemon.includes(pokemonInfo.pokemon)) {
+      accountConfig.sellablePokemon.push(pokemonInfo.pokemon);
+      await saveToFile(configPath, accountConfig);
+      log.info(`Dodano do sellablePokemon (trudność ${diff}): ${pokemonInfo.pokemon}`);
+    }
+    return;
+  }
+
+  const listKey = diffListMap[diff];
+  if (!listKey) return;
+
+  if (!Array.isArray(accountConfig[listKey])) accountConfig[listKey] = [];
+  if (!accountConfig[listKey].includes(pokemonInfo.pokemon)) {
+    accountConfig[listKey].push(pokemonInfo.pokemon);
+    await saveToFile(configPath, accountConfig);
+    log.info(`Dodano do ${listKey} (trudność ${diff}): ${pokemonInfo.pokemon}`);
+  }
+}
 
 while (true){
   if (state.getState().emergencyStop) {
@@ -89,7 +120,7 @@ while (true){
   const locationInfo = region[locationKey];
   const paBuffer = accountConfig.paBuffer || 0;
   await runDailyActions(page);
-  await SellPokemon(page, accountConfig.sellablePokemon);
+  await SellPokemon(page, accountConfig.sellablePokemon,accountConfig.diff3CatchPokemons);
 
   let paResult = await CheckPA(page);
   state.updateStats({ pa: { current: paResult.currentPA, max: paResult.maxPA } });
@@ -116,6 +147,7 @@ while (true){
       state.updateStats({ hp: { current: hpAfterHospital.currentHP, max: hpAfterHospital.maxHP } });
     }
     
+    await runCareIfNeeded(page);
     state.updateStats({ lastEvent: 'adventure_started' });
     await ClickAdventure(page,accountConfig,locations);
 
@@ -123,13 +155,11 @@ while (true){
     await CheckIfBadEvent(page)
     const pokemonInfo= await CheckIfPokemon(page);
       if (pokemonInfo.isPokemon){
-        if (pokemonInfo.catchDiff <= 2 && pokemonInfo.pokemon && !accountConfig.sellablePokemon.includes(pokemonInfo.pokemon)) {
-          accountConfig.sellablePokemon.push(pokemonInfo.pokemon);
-          await saveToFile(configPath, accountConfig);
-          log.info(`Dodano do sellablePokemon (trudność ${pokemonInfo.catchDiff}): ${pokemonInfo.pokemon}`);
-        }
-
-        if (pokemonInfo.level>50){
+        await categorizePokemon(pokemonInfo, accountConfig, configPath);
+         if( pokemonInfo.types[0] === "Wróżkowy" && pokemonInfo.types[1] === "Stalowy"){
+          await ClickPokemon(page,2);
+        }else  
+        if (pokemonInfo.level>accountConfig.secondPokMaxLv ){
             await ClickPokemon(page,accountConfig.pokemonIndex);
         }else{
           await ClickPokemon(page,accountConfig.SecondPokemonIndex);
@@ -200,7 +230,7 @@ while (true){
     await page.reload();
     log.info("Czekam na odnowienie punktów akcji");
     state.updateStats({ lastEvent: 'waiting_for_pa_regen' });
-    await SellPokemon(page, accountConfig.sellablePokemon);
+    await SellPokemon(page, accountConfig.sellablePokemon, accountConfig.diff3CatchPokemons);
     for (let i = 0; i < REGEN_ITERATIONS; i++){
         await page.waitForTimeout(REGEN_WAIT_MINUTES * 60 * 1000);
         await page.reload();

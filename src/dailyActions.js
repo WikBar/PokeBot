@@ -60,13 +60,22 @@ async function navigateViaMenu(page, menuText, itemText) {
 
 async function doDailyLottery(page) {
   await navigateViaMenu(page, 'Miejsca', 'Mini Loteria');
+  try {
+    await page.waitForLoadState('networkidle', { timeout: 8000 });
+  } catch { /* ignore */ }
   await page.waitForTimeout(1500);
+
+  // Loguj HTML sekcji loterii dla diagnostyki
+  try {
+    const lotterySection = await page.locator('div.panel:has-text("Koszt losu"), div.panel:has-text("Spróbuj"), form:has-text("Spróbuj")').first().innerHTML().catch(() => null);
+    if (lotterySection) log.debug('Loteria HTML:', { html: lotterySection.slice(0, 500) });
+  } catch { /* ignore */ }
 
   let clicked = 0;
   const MAX_LOTTERY_CLICKS = 4;
 
   while (clicked < MAX_LOTTERY_CLICKS) {
-    const costContainer = page.locator('div.text-center:has(b:has-text("Koszt losu"))').first();
+    const costContainer = page.locator('div.text-center:has(b:has-text("Koszt losu")), div:has-text("Koszt losu")').first();
     if (await costContainer.count() === 0) {
       log.info('Loteria: nie znaleziono kontenera "Koszt losu" - przerywam.');
       break;
@@ -83,9 +92,16 @@ async function doDailyLottery(page) {
       return true;
     }
 
-    const btn = page.locator('button:has-text("Spróbuj szczęścia")').first();
+    const btn = page.locator([
+      'button:has-text("Spróbuj szczęścia")',
+      'input[type="submit"][value*="Spróbuj"]',
+      'input[type="submit"][value*="szcz"]',
+      'a:has-text("Spróbuj szczęścia")',
+    ].join(', ')).first();
+
     if (await btn.count() === 0) {
-      log.info('Loteria: przycisk "Spróbuj szczęścia" nie znaleziony - przerywam.');
+      const allBtns = await page.locator('button, input[type="submit"]').allInnerTexts().catch(() => []);
+      log.info('Loteria: przycisk "Spróbuj szczęścia" nie znaleziony - przerywam.', { dostepnePrzyciski: allBtns });
       break;
     }
 
@@ -253,8 +269,7 @@ async function doDailyPokemonCare(page, state) {
   saveDailyState(state);
 
   await page.waitForTimeout(2000);
-  const timerAfterClick = await waitForCareTimer(page);
-  if (timerAfterClick) return null;
+  await waitForCareTimer(page);
 
   return true;
 }
@@ -442,6 +457,11 @@ async function runDailyActions(page) {
   if (homeStats.careToday === 'tak') {
     log.info('Opieka: już wykonana dzisiaj - zaznaczam jako done.');
     markActionDone(state, 'pokemonCare', dayKey);
+  } else if (homeStats.careToday === 'nie') {
+    log.info('Opieka: strona mówi "nie" - resetuję flagę done.');
+    delete state.actions['pokemonCare'];
+    delete state.lastCareTime;
+    saveDailyState(state);
   }
 
   if (homeStats.ripe === 0 && homeStats.total != null && homeStats.watered === homeStats.total) {
@@ -463,7 +483,12 @@ async function runDailyActions(page) {
     { key: 'lottery',      label: 'Loteria',              runner: doDailyLottery },
     { key: 'leagueFights', label: 'Walki Ligowe',         runner: doDailyLeagueFights },
     { key: 'farm',         label: 'Hodowla/Farma',        runner: doDailyFarmVisit },
-    { key: 'pokemonCare', label: 'Opieka nad Pokemonem', runner: (page) => doDailyPokemonCare(page, state, dayKey) },
+    { key: 'pokemonCare', label: 'Opieka nad Pokemonem', runner: async (page) => {
+        const result = await doDailyPokemonCare(page, state);
+        if (result === null && state.lastCareTime) return true;
+        return result;
+      }
+    },
     {
       key: 'associationPA', label: 'PA ze Stowarzyszenia',
       runner: async (page) => {
@@ -510,6 +535,38 @@ async function runDailyActions(page) {
   }
 }
 
+async function runCareIfNeeded(page) {
+  const state = loadDailyState();
+  const dayKey = getDailyRunKey();
+
+  const homeStats = await readHomeStats(page);
+  if (homeStats.careToday === 'tak') {
+    markActionDone(state, 'pokemonCare', dayKey);
+    return;
+  }
+  if (homeStats.careToday === 'nie') {
+    delete state.actions['pokemonCare'];
+    delete state.lastCareTime;
+    saveDailyState(state);
+  }
+
+  if (isActionDone(state, 'pokemonCare', dayKey)) {
+    return;
+  }
+  const paResult = await CheckPA(page);
+  if (paResult.currentPA >= paResult.maxPA / 2) {
+    log.info(`runCareIfNeeded: PA ${paResult.currentPA}/${paResult.maxPA} >= 50% - opieka jeszcze nie możliwa.`);
+    return;
+  }
+  log.info(`runCareIfNeeded: PA ${paResult.currentPA}/${paResult.maxPA} < 50% - próbuję wykonać opiekę.`);
+  try {
+    const done = await doDailyPokemonCare(page, state);
+    if (done === true || done === null) markActionDone(state, 'pokemonCare', dayKey);
+  } catch (e) {
+    log.warn('runCareIfNeeded: błąd', { error: String(e) });
+  }
+}
+
 async function runAssociationPAIfNeeded(page) {
   const state = loadDailyState();
   const dayKey = getDailyRunKey();
@@ -546,6 +603,7 @@ async function runPABerriesIfNeeded(page) {
 
 module.exports = {
   runDailyActions,
+  runCareIfNeeded,
   runAssociationPAIfNeeded,
   runPABerriesIfNeeded,
 };
