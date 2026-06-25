@@ -8,7 +8,7 @@ const { CheckPA, CheckStorage, ClickAdventure, CheckIfPokemon,
 const { loadFromFile, saveToFile } = require('./utils/fileOperations');
 const { CheckIfGoodEvent,CheckIfBadEvent, CheckActivity}=require('./events');
 const path = require('path');
-const { runDailyActions, runCareIfNeeded, runAssociationPAIfNeeded, runPABerriesIfNeeded } = require('./dailyActions');
+const { runDailyActions, runCareIfNeeded, runAssociationPAIfNeeded, runPABerriesIfNeeded, areAllDailysDone } = require('./dailyActions');
 const { logger } = require('./utils/logger');
 const { startServer } = require('./server');
 const state = require('./state');
@@ -231,6 +231,7 @@ while (true){
     log.info("Czekam na odnowienie punktów akcji");
     state.updateStats({ lastEvent: 'waiting_for_pa_regen' });
     await SellPokemon(page, accountConfig.sellablePokemon, accountConfig.diff3CatchPokemons);
+    let lastDailyCheckHour = -1;
     for (let i = 0; i < REGEN_ITERATIONS; i++){
         await page.waitForTimeout(REGEN_WAIT_MINUTES * 60 * 1000);
         await page.reload();
@@ -238,6 +239,16 @@ while (true){
           time: new Date().toLocaleTimeString(),
           minutesLeft: (REGEN_ITERATIONS - 1 - i) * REGEN_WAIT_MINUTES
         });
+        const currentHour = new Date().getHours();
+        if (currentHour !== lastDailyCheckHour) {
+          lastDailyCheckHour = currentHour;
+          if (!areAllDailysDone()) {
+            log.info('Sprawdzenie co godzinę: nie wszystkie daily wykonane - uruchamiam runDailyActions.');
+            await runDailyActions(page);
+          } else {
+            log.info('Sprawdzenie co godzinę: wszystkie daily wykonane.');
+          }
+        }
     }
 
     if (new Date().getHours()==0 && new Date().getMinutes()<30){

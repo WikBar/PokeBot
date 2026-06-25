@@ -54,7 +54,7 @@ function getMetricsFilePath(now = new Date()) {
 }
 
 function formatLine(level, message, meta, now = new Date()) {
-  const ts = now.toISOString();
+  const ts = now.toLocaleString('pl-PL', { hour12: false }).replace(', ', 'T');
   const pokemonSuffix = meta && typeof meta === 'object' && meta.pokemon
     ? ` [pokemon: ${meta.pokemon}]`
     : '';

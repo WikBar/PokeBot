@@ -14,7 +14,8 @@ const TEAM_PATH   = path.resolve(__dirname, '..', 'config', 'team.json');
 
 const ALLOWED_CONFIG_KEYS = new Set([
   'region', 'adventureNr', 'randomAdventure',
-  'pokemonIndex', 'SecondPokemonIndex', 'paBuffer', 'sellablePokemon', 'diff3CatchPokemons'
+  'pokemonIndex', 'SecondPokemonIndex', 'paBuffer', 'sellablePokemon',
+  'diff3CatchPokemons', 'diff4CatchPokemons', 'diff5CatchPokemons', 'diff0CatchPokemons'
 ]);
 
 const API_KEY = process.env.API_KEY || null;

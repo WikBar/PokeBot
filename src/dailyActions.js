@@ -7,7 +7,7 @@ const { CheckPA } = require('./actions/stats');
 const log = logger.child({ module: 'dailyActions' });
 
 const DAILY_RESET_HOUR = 0;
-const DAILY_RESET_MINUTE = 30;
+const DAILY_RESET_MINUTE = 40;
 const DAILY_STATE_PATH = path.resolve(__dirname, '..', 'config', 'daily-state.json');
 
 
@@ -19,7 +19,10 @@ function getDailyRunKey(now = new Date()) {
   ) {
     shiftedDate.setDate(shiftedDate.getDate() - 1);
   }
-  return shiftedDate.toISOString().slice(0, 10);
+  const y = shiftedDate.getFullYear();
+  const m = String(shiftedDate.getMonth() + 1).padStart(2, '0');
+  const d = String(shiftedDate.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 }
 
 function loadDailyState() {
@@ -601,9 +604,17 @@ async function runPABerriesIfNeeded(page) {
   }
 }
 
+function areAllDailysDone() {
+  const state = loadDailyState();
+  const dayKey = getDailyRunKey();
+  const keys = ['lottery', 'leagueFights', 'farm', 'pokemonCare', 'associationPA', 'paBerries'];
+  return keys.every(k => isActionDone(state, k, dayKey));
+}
+
 module.exports = {
   runDailyActions,
   runCareIfNeeded,
   runAssociationPAIfNeeded,
   runPABerriesIfNeeded,
+  areAllDailysDone,
 };
