@@ -1,6 +1,6 @@
 {
   "region": "Unova",
-  "adventureNr": 7,
+  "adventureNr": 5,
   "randomAdventure": false,
   "pokemonIndex": 0,
   "SecondPokemonIndex": 1,
@@ -177,7 +177,27 @@
     "Ferroseed",
     "Joltik",
     "Klink",
-    "Tynamo"
+    "Tynamo",
+    "Minccino",
+    "Archen",
+    "Braviary",
+    "Rufflet",
+    "Emolga",
+    "Purrloin",
+    "Basculin Blue",
+    "Foongus",
+    "Vullaby",
+    "Archeops",
+    "Mandibuzz",
+    "Cinccino",
+    "Conkeldurr",
+    "Trubbish",
+    "Scraggy",
+    "Bisharp",
+    "Venipede",
+    "Mienfoo",
+    "Timburr",
+    "Zoroark"
   ],
   "adventureChanged": false,
   "diff3CatchPokemons": [
@@ -187,12 +207,31 @@
     "Galvantula",
     "Eelektrik",
     "Drilbur",
-    "Boldore"
+    "Boldore",
+    "Amoonguss",
+    "Liepard",
+    "Whirlipede",
+    "Tepig",
+    "Heatmor",
+    "Pawniard",
+    "Gurdurr",
+    "Scrafty"
   ],
   "diff4CatchPokemons": [
     "Zebstrika",
-    "Klang"
+    "Klang",
+    "Stunfisk",
+    "Pignite",
+    "Mienshao",
+    "Garbodor",
+    "Durant",
+    "Emboar",
+    "Scolipede"
   ],
-  "diff5CatchPokemons": [],
+  "diff5CatchPokemons": [
+    "Bouffalant",
+    "Sawk",
+    "Throh"
+  ],
   "diff0CatchPokemons": []
 }

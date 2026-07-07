@@ -68,31 +68,20 @@ async function doDailyLottery(page) {
   } catch { /* ignore */ }
   await page.waitForTimeout(1500);
 
-  // Loguj HTML sekcji loterii dla diagnostyki
-  try {
-    const lotterySection = await page.locator('div.panel:has-text("Koszt losu"), div.panel:has-text("Spróbuj"), form:has-text("Spróbuj")').first().innerHTML().catch(() => null);
-    if (lotterySection) log.debug('Loteria HTML:', { html: lotterySection.slice(0, 500) });
-  } catch { /* ignore */ }
-
   let clicked = 0;
-  const MAX_LOTTERY_CLICKS = 4;
 
-  while (clicked < MAX_LOTTERY_CLICKS) {
-    const costContainer = page.locator('div.text-center:has(b:has-text("Koszt losu")), div:has-text("Koszt losu")').first();
-    if (await costContainer.count() === 0) {
-      log.info('Loteria: nie znaleziono kontenera "Koszt losu" - przerywam.');
-      break;
-    }
-    const costText = await costContainer.innerText().catch(() => null);
-    if (!costText) {
-      log.info('Loteria: nie udało się odczytać kosztu losu - przerywam.');
-      break;
-    }
+  while (true) {
+    // Sprawdź koszt losu - jeśli nie DARMOWY i liczba > 7, zatrzymaj
+    const costParent = await page.locator('b:has-text("Koszt losu")').first().locator('xpath=..').innerText().catch(() => '');
+    log.info(`Loteria: koszt losu = "${costParent.trim()}"`);
 
-    const isFree = /DARMOWY/i.test(costText);
-    if (!isFree) {
-      log.info(`Loteria nie jest darmowa (${costText.trim()}) - zaznaczam jako wykonaną.`);
-      return true;
+    const isFree = /DARMOW/i.test(costParent);
+    const costMatch = costParent.match(/:\s*(\d+)/);
+    const costValue = costMatch ? parseInt(costMatch[1], 10) : null;
+
+    if (!isFree && costValue !== null && costValue > 7) {
+      log.info(`Loteria: koszt ${costValue} > 7 - zatrzymuję klikanie.`);
+      break;
     }
 
     const btn = page.locator([
@@ -103,18 +92,17 @@ async function doDailyLottery(page) {
     ].join(', ')).first();
 
     if (await btn.count() === 0) {
-      const allBtns = await page.locator('button, input[type="submit"]').allInnerTexts().catch(() => []);
-      log.info('Loteria: przycisk "Spróbuj szczęścia" nie znaleziony - przerywam.', { dostepnePrzyciski: allBtns });
+      log.info('Loteria: przycisk "Spróbuj szczęścia" nie znaleziony - przerywam.');
       break;
     }
 
-    await btn.click();
+    await btn.click({ force: true });
     clicked++;
-    log.info(`Loteria: kliknięto darmowy los (${clicked}/${MAX_LOTTERY_CLICKS}).`);
+    log.info(`Loteria: kliknięto los (${clicked}), koszt był: ${isFree ? 'DARMOWY' : costValue + ' §'}.`);
     try {
       await page.waitForLoadState('networkidle', { timeout: 5000 });
     } catch { /* ignore */ }
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(1500);
   }
 
   if (clicked === 0) log.info('Loteria: nie kliknięto żadnego losu.');
@@ -143,12 +131,12 @@ async function doDailyFarmVisit(page) {
 
     const harvestBtn = page.locator('button:has-text("Zbierz i Zasiej")').first();
     if (await harvestBtn.count() > 0) {
-      await harvestBtn.click();
+      await harvestBtn.click({ force: true });
       log.info('Farma: kliknięto narzędzie "Zbierz i Zasiej".');
       await page.waitForTimeout(500);
 
       for (const pole of ripe) {
-        await pole.click();
+        await pole.click({ force: true });
         log.info('Farma: kliknięto dojrzałą działkę.');
         await page.waitForTimeout(500);
       }
@@ -167,7 +155,7 @@ async function doDailyFarmVisit(page) {
     const waterBtns = await page.locator('img[aria-label="Podlej Działkę"]').all();
     let clicked = 0;
     for (const btn of waterBtns) {
-      await btn.click();
+      await btn.click({ force: true });
       clicked++;
       await page.waitForTimeout(500);
 
