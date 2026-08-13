@@ -43,7 +43,10 @@ const SAME_TYPE_MAX_LV = 50;
   };
   log.info(`Uruchamiam skrypt... Login to: ${credentials.login}`);
 
-  const browser = await chromium.launch({ headless: false });
+  // Na serwerze (VPS bez pulpitu) ustaw HEADLESS=true w .env.
+  // Lokalnie domyślnie widoczne okno przeglądarki.
+  const headless = String(process.env.HEADLESS || '').toLowerCase() === 'true';
+  const browser = await chromium.launch({ headless });
   const context = await browser.newContext();
   const page = await context.newPage();
 
