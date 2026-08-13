@@ -1,10 +1,11 @@
 {
   "actions": {
-    "lottery": "2026-07-07",
-    "farm": "2026-07-07",
-    "associationPA": "2026-07-07",
-    "paBerries": "2026-07-07",
-    "leagueFights": "2026-07-07",
-    "pokemonCare": "2026-07-07"
-  }
+    "lottery": "2026-08-14",
+    "farm": "2026-08-14",
+    "leagueFights": "2026-08-14",
+    "associationPA": "2026-08-13",
+    "paBerries": "2026-08-13",
+    "pokemonCare": "2026-08-14"
+  },
+  "lastCareTime": "2026-08-13T23:27:48.381Z"
 }

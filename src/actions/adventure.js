@@ -1,6 +1,8 @@
 const { Pokeballe } = require('./constants');
 const { ClickContinue } = require('./activity');
 const { logger } = require('../utils/logger');
+const { notifyGoldenNest } = require('../utils/notifier');
+const { sharesType } = require('./team');
 
 const log = logger.child({ module: 'adventure' });
 
@@ -90,23 +92,40 @@ async function ClickPokemon(page, PokemonIndex) {
   }
 }
 
-async function CatchPokemon(page, pokemon, regionInfo) {
+async function CatchPokemon(page, pokemon, regionInfo, regionName, battleSlot = null) {
   log.info(`Łapię: ${pokemon?.pokemon} Poziom: ${pokemon?.level} o ${new Date().toLocaleTimeString()}`);
   const NestBallMaxLvl = 20;
   const LvlBallMinLvl = 40;
   const time = new Date().getHours();
 
-  if (pokemon.catchDiff === 1 && pokemon.level < 13) {
-    await ClickXBall(page, Pokeballe.pokeball);
+  // Poziom >75 = Golden Nest. Sprawdzamy jako pierwsze, żeby alert wyszedł
+  // także w lokacjach specjalnych (inaczej przechwyciłby je warunek safariball).
+  if (pokemon.level > 75) {
+    if (regionInfo.isSpecial) {
+      await ClickXBall(page, Pokeballe.safariball);
+    } else {
+      await ClickXBall(page, Pokeballe.cherishball);
+    }
+
+    await notifyGoldenNest({
+      region: regionName,
+      location: regionInfo.name,
+      pokemon: pokemon.pokemon,
+      level: pokemon.level,
+    });
+  } else if (pokemon.catchDiff >= 3 && regionInfo.isSpecial) {
+    await ClickXBall(page, Pokeballe.safariball);
+  }  else if (pokemon.catchDiff === 1 && pokemon.level < 13) {
+      await ClickXBall(page, Pokeballe.pokeball);
   } else if (pokemon.catchDiff === 2 && pokemon.level < 30) {
     await ClickXBall(page, Pokeballe.friendball);
   } else if (pokemon.catchDiff >= 4 && pokemon.level < 70) {
     await ClickXBall(page, Pokeballe.ultraball );
-   }else if (pokemon.types[0] === "Wróżkowy" && pokemon.types[1] === "Stalowy") {
+   }else if (sharesType(pokemon.types, battleSlot)) {
+      // Łapany pokemon ma typ wspólny z pokemonem wysłanym do walki.
+      log.info(`Wspólny typ z ${battleSlot?.name} — rzucam lureball`);
       await ClickXBall(page, Pokeballe.lureball );
-  } else if (regionInfo.isGoldenNest || pokemon.level >75) {
-    await ClickXBall(page, Pokeballe.cherishball);
-  } else if (regionInfo.isSpecial) {
+  } else if (pokemon.catchDiff >= 3 && regionInfo.isSpecial) {
     await ClickXBall(page, Pokeballe.safariball);
   } else if ((time >= 18 || time < 6) && pokemon.level >= NestBallMaxLvl && pokemon.level < LvlBallMinLvl) {
     await ClickXBall(page, Pokeballe.nightball);
@@ -121,13 +140,16 @@ async function CatchPokemon(page, pokemon, regionInfo) {
 
 async function ClickXBall(page, pokeball) {
   const buttons = await page.$$(`label[aria-label]`);
+
   for (const btn of buttons) {
     const label = await btn.getAttribute('aria-label');
     if (label === pokeball) {
       await btn.click();
       log.info(`Kliknięto w ${label}`);
+
     }
   }
+
 }
 
 async function checkCatchingDiff(page) {

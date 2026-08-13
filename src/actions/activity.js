@@ -32,6 +32,13 @@ async function CancelActivity(page) {
       }
       await ClickCancelActivity(page);
       log.info("Aktywność anulowana");
+      try {
+        await page.waitForLoadState('networkidle', { timeout: 5000 });
+      } catch {
+        // ignore timeout
+      }
+      await page.reload();
+      log.info("Strona odświeżona po zakończeniu aktywności");
       return true;
     }
   }

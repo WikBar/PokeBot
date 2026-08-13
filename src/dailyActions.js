@@ -59,6 +59,12 @@ async function navigateViaMenu(page, menuText, itemText) {
   } catch {
     // ignore timeout
   }
+  // Domknij dropdown, jeśli został otwarty w DOM po nawigacji (potrafi przysłaniać przyciski pod spodem)
+  const openDropdown = page.locator('ul.dropdown-menu:visible').first();
+  if (await openDropdown.count() > 0) {
+    await page.keyboard.press('Escape').catch(() => {});
+    await page.click('body', { position: { x: 0, y: 0 } }).catch(() => {});
+  }
 }
 
 async function doDailyLottery(page) {
@@ -84,19 +90,26 @@ async function doDailyLottery(page) {
       break;
     }
 
+    // Domknij dropdown, jeśli przysłania przycisk (np. otwarty przez hover)
+    const openDropdown = page.locator('ul.dropdown-menu:visible').first();
+    if (await openDropdown.count() > 0) {
+      await page.keyboard.press('Escape').catch(() => {});
+      await page.click('body', { position: { x: 0, y: 0 } }).catch(() => {});
+    }
+
     const btn = page.locator([
-      'button:has-text("Spróbuj szczęścia")',
-      'input[type="submit"][value*="Spróbuj"]',
-      'input[type="submit"][value*="szcz"]',
-      'a:has-text("Spróbuj szczęścia")',
+      'button:has-text("Spróbuj szczęścia"):not(ul.dropdown-menu *)',
+      'input[type="submit"][value*="Spróbuj"]:not(ul.dropdown-menu *)',
+      'input[type="submit"][value*="szcz"]:not(ul.dropdown-menu *)',
+      'a:has-text("Spróbuj szczęścia"):not(ul.dropdown-menu *)',
     ].join(', ')).first();
 
-    if (await btn.count() === 0) {
+    if (await btn.count() === 0 || !(await btn.isVisible())) {
       log.info('Loteria: przycisk "Spróbuj szczęścia" nie znaleziony - przerywam.');
       break;
     }
 
-    await btn.click({ force: true });
+    await btn.click();
     clicked++;
     log.info(`Loteria: kliknięto los (${clicked}), koszt był: ${isFree ? 'DARMOWY' : costValue + ' §'}.`);
     try {
@@ -125,9 +138,9 @@ async function doDailyFarmVisit(page) {
   let acted = false;
 
   // Krok 1: zbierz dojrzałe jagody (data-etap="4")
-  const ripe = await page.locator('[data-etap="4"]').all();
-  if (ripe.length > 0) {
-    log.info(`Farma: znaleziono ${ripe.length} dojrzałych jagód.`);
+  const ripeCount = await page.locator('[data-etap="4"]').count();
+  if (ripeCount > 0) {
+    log.info(`Farma: znaleziono ${ripeCount} dojrzałych jagód.`);
 
     const harvestBtn = page.locator('button:has-text("Zbierz i Zasiej")').first();
     if (await harvestBtn.count() > 0) {
@@ -135,11 +148,22 @@ async function doDailyFarmVisit(page) {
       log.info('Farma: kliknięto narzędzie "Zbierz i Zasiej".');
       await page.waitForTimeout(500);
 
-      for (const pole of ripe) {
+      // Zbierz ID wszystkich dojrzałych pól RAZ na starcie i kliknij każde po kolei po id.
+      // DOM danego pola (data-etap) nie odświeża się natychmiast po syntetycznym kliknięciu,
+      // więc re-query ".first()" wciąż łapałby to samo, już kliknięte pole.
+      const ripeIds = await page.locator('[data-etap="4"]').evaluateAll(
+        els => els.map(el => el.id).filter(Boolean)
+      );
+      let harvested = 0;
+      for (const poleId of ripeIds) {
+        const pole = page.locator(`#${poleId}`);
+        if (await pole.count() === 0) continue;
         await pole.click({ force: true });
-        log.info('Farma: kliknięto dojrzałą działkę.');
-        await page.waitForTimeout(500);
+        harvested++;
+        log.info(`Farma: kliknięto dojrzałą działkę. id=${poleId}`);
+        await page.waitForTimeout(600);
       }
+      log.info(`Farma: zebrano ${harvested}/${ripeCount} działek.`);
       acted = true;
     } else {
       log.info('Farma: nie znaleziono przycisku "Zbierz i Zasiej".');
@@ -149,18 +173,37 @@ async function doDailyFarmVisit(page) {
   }
 
   // Krok 2: podlej niepodlane działki (data-podlane="0")
-  const unwatered = await page.locator('[data-podlane="0"]').all();
-  if (unwatered.length > 0) {
-    log.info(`Farma: znaleziono ${unwatered.length} niepodlanych działek.`);
-    const waterBtns = await page.locator('img[aria-label="Podlej Działkę"]').all();
-    let clicked = 0;
-    for (const btn of waterBtns) {
-      await btn.click({ force: true });
-      clicked++;
-      await page.waitForTimeout(500);
+  const unwateredCount = await page.locator('[data-podlane="0"]').count();
+  if (unwateredCount > 0) {
+    log.info(`Farma: znaleziono ${unwateredCount} niepodlanych działek.`);
 
+    // Każda "Działka" (sekcja pól, w osobnej zakładce ze scrollem) ma własną konewkę
+    // (img.farma-konewka, onclick="FarmaDzialkaPodlej(this)") - jedno kliknięcie podlewa
+    // całą działkę naraz. Konewki dla dalszych działek bywają poza widocznym obszarem
+    // panelu (Element is not visible mimo force:true), więc wywołujemy onclick
+    // bezpośrednio w DOM zamiast symulować klik myszy.
+    const dzialkaIds = await page.locator('img.farma-konewka').evaluateAll(
+      els => els.map(el => el.getAttribute('data-dzialka-id')).filter(id => id !== null)
+    );
+    log.info(`Farma: znaleziono ${dzialkaIds.length} konewek (działek): ${JSON.stringify(dzialkaIds)}`);
+
+    let watered = 0;
+    for (const dzialkaId of dzialkaIds) {
+      const clicked = await page.evaluate((id) => {
+        const el = document.querySelector(`img.farma-konewka[data-dzialka-id="${id}"]`);
+        if (!el) return false;
+        el.click();
+        return true;
+      }, dzialkaId);
+      if (!clicked) {
+        log.warn(`Farma: konewka dla działki ${dzialkaId} nie znaleziona w DOM - pomijam.`);
+        continue;
+      }
+      watered++;
+      log.info(`Farma: podlano działkę nr ${dzialkaId}.`);
+      await page.waitForTimeout(1000);
     }
-    log.info(`Farma: podlano ${clicked} działek.`);
+    log.info(`Farma: podlano ${watered} działek (konewką).`);
     acted = true;
   } else {
     log.info('Farma: brak niepodlanych działek.');
@@ -282,13 +325,15 @@ async function doDailyLeagueFights(page) {
   let fought = 0;
 
   while (true) {
+    
     const remaining = await getRemainingLeagueFights(page);
     if (remaining === null) {
       log.info('Liga: nie znaleziono licznika walk - przerywam.');
       break;
     }
+    
     log.info(`Liga: pozostałe walki = ${remaining}.`);
-    if (remaining <= 0) break;
+    if (remaining <= 0 || fought >= remaining ) break;
 
     const nextFightBtn = page.locator('button:has-text("Rozpocznij następną walkę"), a:has-text("Rozpocznij następną walkę")').first();
     if (await nextFightBtn.count() === 0) {
@@ -314,7 +359,7 @@ async function doDailyLeagueFights(page) {
       await backBtn.click();
       log.info('Liga: kliknięto "Powrót".');
       await page.waitForTimeout(2000);
-    }
+    } 
 
     fought++;
   }

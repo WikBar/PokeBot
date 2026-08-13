@@ -14,7 +14,7 @@ const TEAM_PATH   = path.resolve(__dirname, '..', 'config', 'team.json');
 
 const ALLOWED_CONFIG_KEYS = new Set([
   'region', 'adventureNr', 'randomAdventure',
-  'pokemonIndex', 'SecondPokemonIndex', 'paBuffer', 'sellablePokemon',
+  'pokemonIndex', 'SecondPokemonIndex', 'paBuffer', 'sellablePokemon', 'protectedPokemon',
   'diff3CatchPokemons', 'diff4CatchPokemons', 'diff5CatchPokemons', 'diff0CatchPokemons'
 ]);
 
@@ -81,9 +81,19 @@ function startServer() {
         return res.status(400).json({ ok: false, error: `Pokemon nie może mieć 2 takich samych typów: ${slot.type1}` });
       }
     }
-    await saveToFile(TEAM_PATH, { team });
+    // Panel web wysyła tylko type1/type2 — zachowujemy nazwę i poziom z dysku,
+    // żeby zapis typów ich nie skasował.
+    const currentTeam = (await loadFromFile(TEAM_PATH))?.team || [];
+    const merged = team.map((slot, i) => ({
+      name: slot.name ?? currentTeam[i]?.name ?? '',
+      level: slot.level ?? currentTeam[i]?.level ?? null,
+      type1: slot.type1,
+      type2: slot.type2,
+    }));
+
+    await saveToFile(TEAM_PATH, { team: merged });
     log.info('Team updated via API');
-    res.json({ ok: true, team });
+    res.json({ ok: true, team: merged });
   });
 
   app.get('/api/logs', (req, res) => {
@@ -118,10 +128,11 @@ function startServer() {
     else if (action === 'resume')   { state.setPaused(false); }
     else if (action === 'stop')     { state.setEmergencyStop(true); }
     else if (action === 'hospital') { setForceHospital(true); }
+    else if (action === 'updateTeam') { state.setForceTeamUpdate(true); }
     else { return res.status(400).json({ ok: false, error: `Unknown action: ${action}` }); }
-    const { isPaused, emergencyStop, forceHospital } = state.getState();
+    const { isPaused, emergencyStop, forceHospital, forceTeamUpdate } = state.getState();
     log.info('Control action received', { action });
-    res.json({ ok: true, isPaused, emergencyStop, forceHospital });
+    res.json({ ok: true, isPaused, emergencyStop, forceHospital, forceTeamUpdate });
   });
 
   app.listen(port, () => {

@@ -4,6 +4,7 @@ const { CheckHP, ClickHospital, EatRawstBerry } = require('./health');
 const { CheckPA, CheckStorage } = require('./stats');
 const { SellPokemon } = require('./pokemon');
 const { login, isSessionAlive } = require('./auth');
+const { UpdateTeam, UpdateTeamIfDue } = require('./team');
 
 module.exports = {
   ClickAdventure,
@@ -21,5 +22,7 @@ module.exports = {
   CheckStorage,
   SellPokemon,
   login,
-  isSessionAlive
+  isSessionAlive,
+  UpdateTeam,
+  UpdateTeamIfDue
 };

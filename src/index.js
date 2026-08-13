@@ -4,7 +4,8 @@ const { CheckPA, CheckStorage, ClickAdventure, CheckIfPokemon,
    CatchPokemon, ClickPokemon,
    CancelActivity, StartActivity,
    CheckHP, ClickHospital,
-   SellPokemon, login, isSessionAlive }  = require('./actions');
+   SellPokemon, login, isSessionAlive, UpdateTeamIfDue }  = require('./actions');
+const { loadTeam, findMatchingTeamIndex } = require('./actions/team');
 const { loadFromFile, saveToFile } = require('./utils/fileOperations');
 const { CheckIfGoodEvent,CheckIfBadEvent, CheckActivity}=require('./events');
 const path = require('path');
@@ -20,6 +21,8 @@ const HP_THRESHOLD = 15;
 const ADVENTURE_TIMEOUT = 3000;
 const REGEN_WAIT_MINUTES = 12;
 const REGEN_ITERATIONS = 10;
+// Poniżej tego poziomu wybieramy do walki pokemona o wspólnym typie.
+const SAME_TYPE_MAX_LV = 50;
 
 (async () => {
   process.on('unhandledRejection', (reason) => {
@@ -53,6 +56,27 @@ const REGEN_ITERATIONS = 10;
     return;
   }
 
+// Dokleja pokemona do listy w config.json bez nadpisywania zmian z panelu web.
+// Czyta świeży plik z dysku, dopisuje tylko do wskazanej listy, zapisuje i
+// synchronizuje kopię w pamięci (accountConfig), by kolejne zapisy bota nie
+// przywróciły starego stanu.
+async function appendToConfigList(configPath, accountConfig, listKey, pokemon) {
+  const fresh = await loadFromFile(configPath);
+  if (!fresh) {
+    log.warn(`Nie udało się wczytać config.json — pomijam zapis ${listKey}: ${pokemon}`);
+    return false;
+  }
+  if (!Array.isArray(fresh[listKey])) fresh[listKey] = [];
+  if (fresh[listKey].includes(pokemon)) {
+    accountConfig[listKey] = fresh[listKey];   // sync in-memory z dyskiem
+    return false;
+  }
+  fresh[listKey].push(pokemon);
+  await saveToFile(configPath, fresh);
+  accountConfig[listKey] = fresh[listKey];      // sync in-memory z dyskiem
+  return true;
+}
+
 async function categorizePokemon(pokemonInfo, accountConfig, configPath) {
   if (!pokemonInfo.pokemon) return;
   const diff = pokemonInfo.catchDiff;
@@ -65,11 +89,15 @@ async function categorizePokemon(pokemonInfo, accountConfig, configPath) {
   };
 
   if (diff !== 0 && diff <= 2) {
-    if (!accountConfig.sellablePokemon.includes(pokemonInfo.pokemon)) {
-      accountConfig.sellablePokemon.push(pokemonInfo.pokemon);
-      await saveToFile(configPath, accountConfig);
-      log.info(`Dodano do sellablePokemon (trudność ${diff}): ${pokemonInfo.pokemon}`);
+    // Pokemony chronione nigdy nie trafiają na listę do sprzedaży.
+    const protectedList = Array.isArray(accountConfig.protectedPokemon) ? accountConfig.protectedPokemon : [];
+    if (protectedList.includes(pokemonInfo.pokemon)) {
+      log.info(`Pominięto dodanie do sellablePokemon – pokemon chroniony: ${pokemonInfo.pokemon}`);
+      return;
     }
+    if (!Array.isArray(accountConfig.sellablePokemon)) accountConfig.sellablePokemon = [];
+    const added = await appendToConfigList(configPath, accountConfig, 'sellablePokemon', pokemonInfo.pokemon);
+    if (added) log.info(`Dodano do sellablePokemon (trudność ${diff}): ${pokemonInfo.pokemon}`);
     return;
   }
 
@@ -77,11 +105,8 @@ async function categorizePokemon(pokemonInfo, accountConfig, configPath) {
   if (!listKey) return;
 
   if (!Array.isArray(accountConfig[listKey])) accountConfig[listKey] = [];
-  if (!accountConfig[listKey].includes(pokemonInfo.pokemon)) {
-    accountConfig[listKey].push(pokemonInfo.pokemon);
-    await saveToFile(configPath, accountConfig);
-    log.info(`Dodano do ${listKey} (trudność ${diff}): ${pokemonInfo.pokemon}`);
-  }
+  const added = await appendToConfigList(configPath, accountConfig, listKey, pokemonInfo.pokemon);
+  if (added) log.info(`Dodano do ${listKey} (trudność ${diff}): ${pokemonInfo.pokemon}`);
 }
 
 while (true){
@@ -104,6 +129,13 @@ while (true){
     }
   const storageResult = await CheckStorage(page);
   state.updateStats({ storage: { current: storageResult.current, max: storageResult.max } });
+  // Odczyt drużyny nie częściej niż raz na 30 minut. Błąd/brak panelu jest
+  // pomijany — kolejna próba nastąpi w następnym przebiegu pętli.
+  // Przycisk w panelu web ustawia forceTeamUpdate i wymusza odczyt od razu.
+  const forceTeam = state.getState().forceTeamUpdate;
+  const teamResult = await UpdateTeamIfDue(page, { force: forceTeam });
+  if (forceTeam) state.setForceTeamUpdate(false);
+  if (teamResult?.team) state.setTeamLastUpdated(new Date().toISOString());
   let accountConfig = await loadFromFile(configPath);
   if (process.env.POKE_ADVENTURE_NR) {
     const parsedAdventureNr = parseInt(process.env.POKE_ADVENTURE_NR, 10);
@@ -120,7 +152,7 @@ while (true){
   const locationInfo = region[locationKey];
   const paBuffer = accountConfig.paBuffer || 0;
   await runDailyActions(page);
-  await SellPokemon(page, accountConfig.sellablePokemon,accountConfig.diff3CatchPokemons);
+  await SellPokemon(page, accountConfig.sellablePokemon, accountConfig.diff3CatchPokemons, accountConfig.protectedPokemon);
 
   let paResult = await CheckPA(page);
   state.updateStats({ pa: { current: paResult.currentPA, max: paResult.maxPA } });
@@ -156,17 +188,28 @@ while (true){
     const pokemonInfo= await CheckIfPokemon(page);
       if (pokemonInfo.isPokemon){
         await categorizePokemon(pokemonInfo, accountConfig, configPath);
-         if( pokemonInfo.types[0] === "Wróżkowy" && pokemonInfo.types[1] === "Stalowy"){
-          await ClickPokemon(page,2);
-        }else  
-        if (pokemonInfo.level>accountConfig.secondPokMaxLv ){
-            await ClickPokemon(page,accountConfig.pokemonIndex);
-        }else{
-          await ClickPokemon(page,accountConfig.SecondPokemonIndex);
+
+        // Poniżej 50 poziomu wysyłamy do walki pokemona o typie wspólnym
+        // z łapanym. Gdy takiego nie ma, wracamy do wyboru wg poziomu.
+        const team = await loadTeam();
+        let battleIndex = null;
+        if (pokemonInfo.level < SAME_TYPE_MAX_LV) {
+          const matchIndex = findMatchingTeamIndex(team, pokemonInfo.types);
+          if (matchIndex !== -1) {
+            battleIndex = matchIndex;
+            log.info(`Wspólny typ – wysyłam ${team[matchIndex].name} (slot ${matchIndex + 1})`);
+          }
         }
+        if (battleIndex === null) {
+          battleIndex = pokemonInfo.level > accountConfig.secondPokMaxLv
+            ? accountConfig.pokemonIndex
+            : accountConfig.SecondPokemonIndex;
+        }
+        await ClickPokemon(page, battleIndex);
+        const battleSlot = team[battleIndex] || null;
 
         if (await CheckIfGoodEvent(page)==3){
-          await CatchPokemon(page,pokemonInfo,locationInfo);
+          await CatchPokemon(page,pokemonInfo,locationInfo,accountConfig.region,battleSlot);
           state.updateStats({ lastEvent: 'pokemon_caught' });
           }
 
@@ -190,6 +233,14 @@ while (true){
         const hpAfterForce = await ClickHospital(page);
         state.updateStats({ hp: { current: hpAfterForce.currentHP, max: hpAfterForce.maxHP } });
         state.setForceHospital(false);
+      }
+      // Przycisk "Odczytaj z gry" — obsługujemy też tutaj, bo bot spędza
+      // większość czasu w tej pętli, a nie na początku pętli głównej.
+      if (state.getState().forceTeamUpdate) {
+        log.info('Wymuszony odczyt drużyny z panelu web');
+        await UpdateTeamIfDue(page, { force: true });
+        state.setForceTeamUpdate(false);
+        state.setTeamLastUpdated(new Date().toISOString());
       }
 
       const prevAdventureNr = accountConfig.adventureNr;
@@ -215,7 +266,15 @@ while (true){
       const currentIdx = nonSpecial.findIndex(([key]) => Number(key) === accountConfig.adventureNr);
       const nextIdx = (currentIdx + 1) % nonSpecial.length;
       accountConfig.adventureNr = Number(nonSpecial[nextIdx][0]);
-      await saveToFile(configPath, accountConfig);
+      // Zapisz TYLKO adventureNr na świeżej kopii z dysku, by nie nadpisać
+      // zmian list zrobionych w panelu web.
+      const fresh = await loadFromFile(configPath);
+      if (fresh) {
+        fresh.adventureNr = accountConfig.adventureNr;
+        await saveToFile(configPath, fresh);
+      } else {
+        await saveToFile(configPath, accountConfig);
+      }
       log.info(`randomAdventure: następna lokacja → ${accountConfig.adventureNr} (${nonSpecial[nextIdx][1].name})`);
     }
 
@@ -230,7 +289,7 @@ while (true){
     await page.reload();
     log.info("Czekam na odnowienie punktów akcji");
     state.updateStats({ lastEvent: 'waiting_for_pa_regen' });
-    await SellPokemon(page, accountConfig.sellablePokemon, accountConfig.diff3CatchPokemons);
+    await SellPokemon(page, accountConfig.sellablePokemon, accountConfig.diff3CatchPokemons, accountConfig.protectedPokemon);
     let lastDailyCheckHour = -1;
     for (let i = 0; i < REGEN_ITERATIONS; i++){
         await page.waitForTimeout(REGEN_WAIT_MINUTES * 60 * 1000);
@@ -239,6 +298,13 @@ while (true){
           time: new Date().toLocaleTimeString(),
           minutesLeft: (REGEN_ITERATIONS - 1 - i) * REGEN_WAIT_MINUTES
         });
+        // Przycisk "Odczytaj z gry" działa też podczas oczekiwania na PA.
+        if (state.getState().forceTeamUpdate) {
+          log.info('Wymuszony odczyt drużyny z panelu web');
+          await UpdateTeamIfDue(page, { force: true });
+          state.setForceTeamUpdate(false);
+          state.setTeamLastUpdated(new Date().toISOString());
+        }
         const currentHour = new Date().getHours();
         if (currentHour !== lastDailyCheckHour) {
           lastDailyCheckHour = currentHour;

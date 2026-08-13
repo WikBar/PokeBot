@@ -52,6 +52,14 @@
     "5": { "name": "Wielki Kanion Poni", "requiredPA": 13, "isSpecial": false  },
     "6": { "name": "Góra Lanakila", "requiredPA": 20, "isSpecial": true}
   },
+  "Kalos": {
+    "1": { "name": "Francuski Labirynt", "requiredPA": 9 , "isSpecial": false },
+    "2": { "name": "Lazurowa Zatoka", "requiredPA": 9 , "isSpecial": false },
+    "3": { "name": "Mroczna Gęstwina", "requiredPA": 18 , "isSpecial": false },
+    "4": { "name": "Lustrzana Grota", "requiredPA": 14, "isSpecial": false  },
+    "5": { "name": "Oszroniona Pieczara", "requiredPA": 9, "isSpecial": false  },
+    "6": { "name": "Przyjazne Safari", "requiredPA": 14, "isSpecial": true}
+  },
   "Paldea": {
     "1": { "name": "Melancholijne Pola", "requiredPA": 10, "isSpecial": false },
     "2": { "name": "Gąszcz Tagtree", "requiredPA": 10, "isSpecial": false },

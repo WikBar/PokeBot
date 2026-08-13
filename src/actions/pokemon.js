@@ -3,10 +3,17 @@ const { logger } = require('../utils/logger');
 
 const log = logger.child({ module: 'pokemon' });
 
-async function SellPokemon(page, pokemonToSell, diff3Pokemons = []) {
+async function SellPokemon(page, pokemonToSell, diff3Pokemons = [], protectedPokemon = []) {
   if (!Array.isArray(pokemonToSell) || pokemonToSell.length === 0) {
     log.info("Brak listy pokemonów do sprzedaży.");
     return;
+  }
+
+  // Lista chroniona ma pierwszeństwo — nawet jeśli pokemon jest na sellablePokemon
+  // lub przekracza limit diff3, nie trafi do sprzedaży.
+  const protectedList = Array.isArray(protectedPokemon) ? protectedPokemon : [];
+  if (protectedList.length > 0) {
+    log.info(`Chronione przed sprzedażą: ${protectedList.join(', ')}`);
   }
   await page.getByRole('img', { name: 'Sprzedaj Pokemony z Przechowalni' }).click();
   log.info("Jesteś w Hodowli Pokemonów");
@@ -51,7 +58,12 @@ async function SellPokemon(page, pokemonToSell, diff3Pokemons = []) {
   const matchedIndexes = [];
   const seenTypes = new Set();
 
+  // true, jeśli tekst przycisku pasuje do któregokolwiek chronionego pokemona
+  const isProtected = (text) =>
+    protectedList.some(name => new RegExp(escapeRegExp(name)).test(text));
+
   for (let i = 0; i < texts.length; i++) {
+    if (isProtected(texts[i])) continue;
     const matchedName = pokemonToSell.find(name => new RegExp(escapeRegExp(name)).test(texts[i]));
     if (matchedName) {
       if (seenTypes.has(matchedName)) {
@@ -67,6 +79,7 @@ async function SellPokemon(page, pokemonToSell, diff3Pokemons = []) {
   if (diff3List.length > 0) {
     const diff3Counts = new Map();
     for (let i = 0; i < texts.length; i++) {
+      if (isProtected(texts[i])) continue;
       const matchedName = diff3List.find(name => new RegExp(escapeRegExp(name)).test(texts[i]));
       if (matchedName) {
         const current = diff3Counts.get(matchedName) || { count: 0, indexes: [] };

@@ -7,6 +7,8 @@ const _state = {
   isPaused:      false,
   emergencyStop: false,
   forceHospital: false,
+  forceTeamUpdate: false,
+  teamLastUpdated: null,
   region:        null,
   adventureNr:   null,
   lastEvent:     null,
@@ -43,8 +45,10 @@ function addLog(entry) {
 function setPaused(bool)        { _state.isPaused = bool;      _notifySseClients(); }
 function setEmergencyStop(bool) { _state.emergencyStop = bool; _notifySseClients(); }
 function setForceHospital(bool) { _state.forceHospital = bool; _notifySseClients(); }
+function setForceTeamUpdate(bool) { _state.forceTeamUpdate = bool; _notifySseClients(); }
+function setTeamLastUpdated(iso)  { _state.teamLastUpdated = iso; _notifySseClients(); }
 
 function subscribeSse(res)   { _sseClients.add(res); }
 function unsubscribeSse(res) { _sseClients.delete(res); }
 
-module.exports = { getState, updateStats, addLog, setPaused, setEmergencyStop, setForceHospital, subscribeSse, unsubscribeSse };
+module.exports = { getState, updateStats, addLog, setPaused, setEmergencyStop, setForceHospital, setForceTeamUpdate, setTeamLastUpdated, subscribeSse, unsubscribeSse };
