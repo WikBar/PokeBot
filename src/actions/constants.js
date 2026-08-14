@@ -11,7 +11,7 @@ const Pokeballe = {
   lureball: "lureballe"
 };
 
-const SELL_THRESHOLD = 20;
+const SELL_THRESHOLD = 10;
 const MAX_SELL_CLICK = 100;
 const CLICK_DELAY = 150;
 
