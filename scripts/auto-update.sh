@@ -8,22 +8,27 @@
 #   chmod +x scripts/auto-update.sh
 #   ./scripts/auto-update.sh
 #
+# Ten sam skrypt obsluguje panel web - wystarcza zmienne srodowiskowe:
+#   PROJECT_DIR=/sciezka/do/WebServerPokeBot \
+#   UPDATE_BRANCH=master PM2_NAME=Pokebot-dashboard ./scripts/auto-update.sh
+#
 # Automatycznie co 10 minut (crontab -e):
-#   */10 * * * * /root/PokeBot/scripts/auto-update.sh >> /root/PokeBot/logs/auto-update.log 2>&1
+#   */10 * * * * /sciezka/PokeBot/scripts/auto-update.sh >> /sciezka/PokeBot/logs/auto-update.log 2>&1
 
 set -uo pipefail
 
-# Katalog projektu = katalog nadrzedny wzgledem tego skryptu.
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$PROJECT_DIR" || exit 1
+# Katalog projektu: z PROJECT_DIR, a domyslnie katalog nadrzedny skryptu.
+PROJECT_DIR="${PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+cd "$PROJECT_DIR" || { echo "BLAD: brak katalogu $PROJECT_DIR"; exit 1; }
 
 BRANCH="${UPDATE_BRANCH:-Tests}"
 PM2_NAME="${PM2_NAME:-Pokebot}"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 
-# Blokada, zeby dwa uruchomienia nie nadpisywaly sie nawzajem.
-LOCK="/tmp/pokebot-update.lock"
+# Kopia .env i blokada sa osobne dla kazdego projektu (bot / panel).
+ENV_BACKUP="/tmp/pokebot-env-$(echo "$PROJECT_DIR" | md5sum | cut -c1-8).bak"
+LOCK="/tmp/pokebot-update-$(echo "$PROJECT_DIR" | md5sum | cut -c1-8).lock"
 if ! mkdir "$LOCK" 2>/dev/null; then
   log "Aktualizacja juz trwa - pomijam."
   exit 0
@@ -44,7 +49,7 @@ log "Nowa wersja: ${LOCAL:0:7} -> ${REMOTE:0:7}"
 
 # .env nie jest w repo, ale chronimy go na wypadek starszych klonow,
 # w ktorych byl jeszcze sledzony.
-[ -f .env ] && cp .env "/tmp/pokebot-env-backup"
+[ -f .env ] && cp .env "$ENV_BACKUP"
 
 # Lokalne zmiany plikow roboczych (config/*.json) blokowalyby merge.
 if ! git diff --quiet || ! git diff --cached --quiet; then
@@ -54,14 +59,14 @@ fi
 
 if ! git merge --ff-only "origin/$BRANCH" --quiet; then
   log "BLAD: nie udalo sie scalic zmian (wymagana reczna interwencja)."
-  [ -f /tmp/pokebot-env-backup ] && cp /tmp/pokebot-env-backup .env
+  [ -f "$ENV_BACKUP" ] && cp "$ENV_BACKUP" .env
   exit 1
 fi
 
 # Przywracamy .env, gdyby merge go ruszyl.
-if [ -f /tmp/pokebot-env-backup ]; then
-  cp /tmp/pokebot-env-backup .env
-  rm -f /tmp/pokebot-env-backup
+if [ -f "$ENV_BACKUP" ]; then
+  cp "$ENV_BACKUP" .env
+  rm -f "$ENV_BACKUP"
 fi
 
 # npm install tylko gdy zmienily sie zaleznosci.
