@@ -11,6 +11,7 @@ const log = logger.child({ module: 'server' });
 const CONFIG_PATH = path.resolve(__dirname, '..', 'config', 'config.json');
 const DAILY_PATH  = path.resolve(__dirname, '..', 'config', 'daily-state.json');
 const TEAM_PATH   = path.resolve(__dirname, '..', 'config', 'team.json');
+const LOCATIONS_PATH = path.resolve(__dirname, '..', 'config', 'locations.json');
 
 const ALLOWED_CONFIG_KEYS = new Set([
   'region', 'adventureNr', 'randomAdventure',
@@ -56,6 +57,12 @@ function startServer() {
     await saveToFile(CONFIG_PATH, updated);
     log.info('Config updated via API', { patch });
     res.json({ ok: true, config: updated });
+  });
+
+  // Lista regionów dla panelu web — zawsze zgodna z locations.json.
+  app.get('/api/regions', async (_req, res) => {
+    const locations = await loadFromFile(LOCATIONS_PATH);
+    res.json({ regions: locations ? Object.keys(locations) : [] });
   });
 
   app.get('/api/daily', async (req, res) => {
