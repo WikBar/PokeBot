@@ -96,22 +96,24 @@ async function CatchPokemon(page, pokemon, regionInfo, regionName, battleSlot = 
   log.info(`Łapię: ${pokemon?.pokemon} Poziom: ${pokemon?.level} o ${new Date().toLocaleTimeString()}`);
   const NestBallMaxLvl = 20;
   const LvlBallMinLvl = 40;
+  const LureBallMaxLvl = 30;
   const time = new Date().getHours();
 
   // Poziom >75 = Golden Nest. Sprawdzamy jako pierwsze, żeby alert wyszedł
   // także w lokacjach specjalnych (inaczej przechwyciłby je warunek safariball).
    if (pokemon.catchDiff >= 3 && regionInfo.isSpecial) {
     await ClickXBall(page, Pokeballe.safariball);
+  } else if (pokemon.level < LureBallMaxLvl && pokemon.catchDiff <= 2 && sharesType(pokemon.types, battleSlot)) {
+      // Lureball ma pierwszenstwo przed pokeballem i friendballem: ponizej 30
+      // poziomu, trudnosc <=2 i typ wspolny z pokemonem wyslanym do walki.
+      log.info(`Wspólny typ z ${battleSlot?.name} — rzucam lureball`);
+      await ClickXBall(page, Pokeballe.lureball );
   }  else if (pokemon.catchDiff === 1 && pokemon.level < 13) {
       await ClickXBall(page, Pokeballe.pokeball);
   } else if (pokemon.catchDiff === 2 && pokemon.level < 30) {
     await ClickXBall(page, Pokeballe.friendball);
   } else if (pokemon.catchDiff >= 4 && pokemon.level < 70) {
     await ClickXBall(page, Pokeballe.ultraball );
-   }else if (sharesType(pokemon.types, battleSlot)) {
-      // Łapany pokemon ma typ wspólny z pokemonem wysłanym do walki.
-      log.info(`Wspólny typ z ${battleSlot?.name} — rzucam lureball`);
-      await ClickXBall(page, Pokeballe.lureball );
   } else if (pokemon.catchDiff >= 3 && regionInfo.isSpecial) {
     await ClickXBall(page, Pokeballe.safariball);
   } else if (pokemon.level > 75 ) {
