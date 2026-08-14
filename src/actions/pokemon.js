@@ -3,15 +3,27 @@ const { logger } = require('../utils/logger');
 
 const log = logger.child({ module: 'pokemon' });
 
-// Ile sztuk danego gatunku zostawiamy w przechowalni (reszta na sprzedaż).
+// Domyslne limity, uzywane gdy config.json ich nie definiuje.
 const DIFF3_KEEP = 5;
 const DIFF4_KEEP = 5;
 
-async function SellPokemon(page, pokemonToSell, diff3Pokemons = [], protectedPokemon = [], diff4Pokemons = []) {
+// Liczba z configu, z fallbackiem gdy brak wartosci lub jest niepoprawna.
+function numberOr(value, fallback) {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
+async function SellPokemon(page, pokemonToSell, diff3Pokemons = [], protectedPokemon = [], diff4Pokemons = [], options = {}) {
   if (!Array.isArray(pokemonToSell) || pokemonToSell.length === 0) {
     log.info("Brak listy pokemonów do sprzedaży.");
     return;
   }
+
+  // Ustawienia z config.json (panel web). Brak wartosci = dotychczasowe domyslne.
+  const sellThreshold = numberOr(options.sellThreshold, SELL_THRESHOLD);
+  const diff3Keep = numberOr(options.diff3Keep, DIFF3_KEEP);
+  const diff4Keep = numberOr(options.diff4Keep, DIFF4_KEEP);
+  const limitsEnabled = options.limitsEnabled !== false;   // domyslnie wlaczone
 
   // Lista chroniona ma pierwszeństwo — nawet jeśli pokemon jest na sellablePokemon
   // lub przekracza limit diff3, nie trafi do sprzedaży.
@@ -107,13 +119,17 @@ async function SellPokemon(page, pokemonToSell, diff3Pokemons = [], protectedPok
     }
   };
 
-  limitSurplus(diff3Pokemons, DIFF3_KEEP, 'diff3');
-  limitSurplus(diff4Pokemons, DIFF4_KEEP, 'diff4');
+  if (limitsEnabled) {
+    limitSurplus(diff3Pokemons, diff3Keep, 'diff3');
+    limitSurplus(diff4Pokemons, diff4Keep, 'diff4');
+  } else {
+    log.info('Limity diff3/diff4 wyłączone – sprzedaję tylko z listy sellable.');
+  }
 
   log.info(`Zachowuję po jednym: ${[...seenTypes].join(', ')}`);
   log.info(`Dopasowane do sprzedaży ${matchedIndexes.length} pokemonów`);
 
-  if (matchedIndexes.length > SELL_THRESHOLD) {
+  if (matchedIndexes.length > sellThreshold) {
     let clicked = 0;
     for (const index of matchedIndexes) {
       await buttons.nth(index).click();

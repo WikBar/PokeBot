@@ -155,7 +155,12 @@ while (true){
   const locationInfo = region[locationKey];
   const paBuffer = accountConfig.paBuffer || 0;
   await runDailyActions(page);
-  await SellPokemon(page, accountConfig.sellablePokemon, accountConfig.diff3CatchPokemons, accountConfig.protectedPokemon, accountConfig.diff4CatchPokemons);
+  await SellPokemon(page, accountConfig.sellablePokemon, accountConfig.diff3CatchPokemons, accountConfig.protectedPokemon, accountConfig.diff4CatchPokemons, {
+    sellThreshold: accountConfig.sellThreshold,
+    limitsEnabled: accountConfig.limitsEnabled,
+    diff3Keep: accountConfig.diff3Keep,
+    diff4Keep: accountConfig.diff4Keep,
+  });
 
   let paResult = await CheckPA(page);
   state.updateStats({ pa: { current: paResult.currentPA, max: paResult.maxPA } });
@@ -292,7 +297,12 @@ while (true){
     await page.reload();
     log.info("Czekam na odnowienie punktów akcji");
     state.updateStats({ lastEvent: 'waiting_for_pa_regen' });
-    await SellPokemon(page, accountConfig.sellablePokemon, accountConfig.diff3CatchPokemons, accountConfig.protectedPokemon, accountConfig.diff4CatchPokemons);
+    await SellPokemon(page, accountConfig.sellablePokemon, accountConfig.diff3CatchPokemons, accountConfig.protectedPokemon, accountConfig.diff4CatchPokemons, {
+    sellThreshold: accountConfig.sellThreshold,
+    limitsEnabled: accountConfig.limitsEnabled,
+    diff3Keep: accountConfig.diff3Keep,
+    diff4Keep: accountConfig.diff4Keep,
+  });
     let lastDailyCheckHour = -1;
     for (let i = 0; i < REGEN_ITERATIONS; i++){
         await page.waitForTimeout(REGEN_WAIT_MINUTES * 60 * 1000);

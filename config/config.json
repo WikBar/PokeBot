@@ -6,6 +6,10 @@
   "SecondPokemonIndex": 2,
   "paBuffer": 0,
   "secondPokMaxLv": 80,
+  "sellThreshold": 10,
+  "limitsEnabled": true,
+  "diff3Keep": 5,
+  "diff4Keep": 5,
   "sellablePokemon": [
     "Zubat",
     "Magikarp",

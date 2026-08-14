@@ -16,6 +16,7 @@ const LOCATIONS_PATH = path.resolve(__dirname, '..', 'config', 'locations.json')
 const ALLOWED_CONFIG_KEYS = new Set([
   'region', 'adventureNr', 'randomAdventure',
   'pokemonIndex', 'SecondPokemonIndex', 'paBuffer', 'sellablePokemon', 'protectedPokemon',
+  'sellThreshold', 'limitsEnabled', 'diff3Keep', 'diff4Keep',
   'diff3CatchPokemons', 'diff4CatchPokemons', 'diff5CatchPokemons', 'diff0CatchPokemons'
 ]);
 
