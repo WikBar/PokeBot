@@ -124,6 +124,15 @@ async function OpenBackpackAndUpdate(page, navigate) {
   } catch (e) {
     log.warn('Plecak: błąd podczas odczytu', { error: String(e) });
     return null;
+  } finally {
+    // Po odczycie wracamy do stanu wyjściowego — bot nie zostaje w plecaku.
+    try {
+      await page.reload();
+      await page.waitForTimeout(1000);
+      log.debug('Plecak: odświeżono stronę.');
+    } catch (e) {
+      log.debug('Plecak: nie udało się odświeżyć strony', { error: String(e) });
+    }
   }
 }
 

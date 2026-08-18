@@ -9,7 +9,8 @@ const { loadTeam, findMatchingTeamIndex } = require('./actions/team');
 const { loadFromFile, saveToFile } = require('./utils/fileOperations');
 const { CheckIfGoodEvent,CheckIfBadEvent, CheckActivity}=require('./events');
 const path = require('path');
-const { runDailyActions, runCareIfNeeded, runAssociationPAIfNeeded, runPABerriesIfNeeded, areAllDailysDone } = require('./dailyActions');
+const { runDailyActions, runCareIfNeeded, runAssociationPAIfNeeded, runPABerriesIfNeeded, areAllDailysDone, navigateViaMenu } = require('./dailyActions');
+const { OpenBackpackAndUpdate } = require('./actions/equipment');
 const { logger } = require('./utils/logger');
 const { startServer } = require('./server');
 const state = require('./state');
@@ -293,6 +294,8 @@ while (true){
     if (activityCheck === false && paCheck.currentPA < locationInfo.requiredPA){
       await StartActivity(page);
       state.updateStats({ activity: { active: true } });
+      // Po wysłaniu na trening odświeżamy stan plecaka.
+      await OpenBackpackAndUpdate(page, navigateViaMenu);
     }
     await page.reload();
     log.info("Czekam na odnowienie punktów akcji");

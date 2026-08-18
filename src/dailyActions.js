@@ -333,6 +333,11 @@ async function doDailyPokemonCare(page, state) {
   await page.waitForTimeout(2000);
   await waitForCareTimer(page);
 
+  // Po opiece odświeżamy stan plecaka (po timerze, żeby nie opuszczać
+  // strony aktywności w trakcie oczekiwania).
+  const { OpenBackpackAndUpdate } = require('./actions/equipment');
+  await OpenBackpackAndUpdate(page, navigateViaMenu);
+
   return true;
 }
 
@@ -731,4 +736,5 @@ module.exports = {
   areAllDailysDone,
   doDailyLeagueFights,
   isLeagueBlockedNow,
+  navigateViaMenu,
 };
