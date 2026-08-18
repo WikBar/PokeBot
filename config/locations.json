@@ -303,7 +303,7 @@
     },
     "5": {
       "name": "Wyspa Pancerza",
-      "requiredPA": 20,
+      "requiredPA": 10,
       "isSpecial": false
     },
     "6": {
