@@ -15,7 +15,8 @@ const DEFAULT_THRESHOLD = 10;
 // Podpis kafelki ma format "50 x MAX Repel"; przedmioty unikatowe
 // (np. "Blyszczacy Medalion Zal") nie maja liczby - to 1 sztuka.
 const BACKPACK = {
-  // Kafelka przedmiotu - bierzemy tylko te z podpisem.
+  // Kafelka przedmiotu WEWNATRZ panelu plecaka. Bez tego ograniczenia
+  // selektor lapie tez panel czatu i inne kolumny strony.
   item: '.col-xs-3, .col-sm-3, .thumbnail',
   // Panel zakladki; wszystkie sa w DOM naraz, zakladki tylko przelaczaja widok.
   pane: '.tab-pane[id^="plecaktab-"]',
@@ -33,19 +34,30 @@ const TAB_NAMES = {
   ulepszenia: 'Ulepszenia',
 };
 
-// Rozbija podpis kafelki na nazwe i ilosc.
-// "50 x MAX Repel" -> { name: 'MAX Repel', value: 50 }
-// "Blyszczacy Medalion Zal" -> { name: '...', value: 1 }
+// Rozbija podpis kafelki na nazwe i ilosc. Sa dwa formaty:
+//   "50 x MAX Repel"     -> { name: 'MAX Repel', value: 50 }   (wiekszosc zakladek)
+//   "x3 X Szybkość II"   -> { name: 'X Szybkość II', value: 3 } (zakladka Trzymane)
+//   "Blyszczacy Medalion Zal" -> { name: '...', value: 1 }      (bez liczby)
+// Uwaga: "X Atak III" zaczyna sie od litery X, ale to nie mnoznik -
+// dlatego po "x" wymagamy cyfry.
 function parseItemLabel(text) {
   const label = String(text || '').replace(/\s+/g, ' ').trim();
   if (!label) return null;
 
-  const m = label.match(/^([\d\s.,]+)\s*x\s*(.+)$/i);
-  if (m) {
-    const value = parseInt(m[1].replace(/[^\d]/g, ''), 10);
-    const name = m[2].trim();
-    if (!name || Number.isNaN(value)) return null;
-    return { name, value };
+  // Format "<ilosc> x <nazwa>"
+  const suffix = label.match(/^([\d\s.,]+)\s*x\s+(.+)$/i);
+  if (suffix) {
+    const value = parseInt(suffix[1].replace(/[^\d]/g, ''), 10);
+    const name = suffix[2].trim();
+    if (name && !Number.isNaN(value)) return { name, value };
+  }
+
+  // Format "x<ilosc> <nazwa>" - uzywany w zakladce "Trzymane"
+  const prefix = label.match(/^x\s*(\d[\d\s.,]*)\s+(.+)$/i);
+  if (prefix) {
+    const value = parseInt(prefix[1].replace(/[^\d]/g, ''), 10);
+    const name = prefix[2].trim();
+    if (name && !Number.isNaN(value)) return { name, value };
   }
 
   // Brak liczby = przedmiot unikatowy, mamy go 1 sztuke.
@@ -160,13 +172,11 @@ async function readBackpackItems(page) {
   }
 
   if (Object.keys(groups).length === 0) {
-    // Brak paneli - stary uklad strony; czytamy plasko, jak dotad.
-    const flat = await readVisibleItems(page);
-    if (Object.keys(flat).length === 0) {
-      log.debug('Plecak: nie znaleziono kafelek przedmiotow.');
-      return null;
-    }
-    return flat;
+    // Brak paneli #plecaktab-* = nie jestesmy na stronie plecaka.
+    // Nie czytamy wtedy nic "na wszelki wypadek", bo selektor kafelek
+    // zlapalby panel czatu i nadpisal plik smieciem.
+    log.debug('Plecak: brak paneli plecaka - pomijam odczyt.');
+    return null;
   }
   return groups;
 }
@@ -181,7 +191,13 @@ async function UpdateEquipment(page, options = {}) {
     log.info('Plecak: nie udało się odczytać zawartości - pomijam.');
     return null;
   }
+  return saveEquipment(items, options);
+}
 
+// Zapisuje odczytana zawartosc plecaka, aktualizuje panel i wysyla
+// powiadomienia o brakach. Wydzielone, by dalo sie uzyc juz odczytanych
+// danych, bez ponownego czytania strony.
+async function saveEquipment(items, options = {}) {
   const { items: previous, thresholds } = await loadEquipment();
 
   const lastUpdated = new Date().toISOString();
@@ -229,10 +245,10 @@ async function UpdateEquipment(page, options = {}) {
   return { items, flat, low };
 }
 
-// Uzycie przedmiotu: na kafelce nie ma widocznego przycisku, wiec klikamy
-// sama kafelke, a potem ewentualne potwierdzenie w oknie modalnym.
-const USE_CONFIRM = 'button, a.btn, input[type="submit"]';
-const USE_TEXTS = ['Użyj', 'Uzyj', 'Aktywuj', 'Tak', 'Potwierdź', 'Potwierdz'];
+// --- Uzycie Tepela/Repela ------------------------------------------------
+// Przebieg: kafelka -> modal #plecak-<kind><tier> z przyciskiem "Uzyj"
+// -> ekran z pytaniem "Czy na pewno..." i przyciskiem "Potwierdz".
+const USE_BTN = 'button, a.btn, input[type="submit"]';
 
 // Otwiera zakladke plecaka o podanej nazwie (np. "Używalne").
 // Panele sa w DOM od razu, ale kliknac mozna tylko w widoczna kafelke.
@@ -248,44 +264,77 @@ async function openTab(page, tabName) {
   }
 }
 
-// Klika kafelke wskazanego przedmiotu i zatwierdza ewentualne okno
-// potwierdzenia. Zwraca true po kliknieciu.
-async function clickUseItem(page, itemName, tabName) {
-  const target = normalizeItemName(itemName);
-  if (tabName) await openTab(page, tabName);
+// Klika widoczny przycisk o podanym napisie. Zwraca true, gdy kliknieto.
+async function clickButton(scope, text, timeout = 5000) {
+  try {
+    const btn = scope.locator(`${USE_BTN}:visible`, { hasText: text }).first();
+    await btn.waitFor({ state: 'visible', timeout });
+    await btn.click();
+    return true;
+  } catch {
+    return false;
+  }
+}
 
-  // Tylko widoczne kafelki - ten sam przedmiot moze byc w DOM w ukrytym
-  // panelu innej zakladki, a w taki nie da sie kliknac.
+// Uzywa Tepela/Repela: kafelka -> modal -> "Uzyj" -> "Potwierdz".
+// Modal ma id #plecak-<kind><tier>, np. #plecak-repel3 dla MAX Repela -
+// to ten sam schemat, ktorym health.js rozpoznaje aktywny przedmiot.
+// Zwraca true dopiero po zatwierdzeniu.
+async function clickUseItem(page, itemName, kind, tier) {
+  const target = normalizeItemName(itemName);
+  await openTab(page, TAB_NAMES.trener);
+
+  // 1. Kafelka przedmiotu. Tylko widoczne - ten sam przedmiot jest w DOM
+  //    takze w ukrytych panelach innych zakladek.
   const tiles = page.locator(`${BACKPACK.item}:visible`);
   const count = await tiles.count().catch(() => 0);
+  let opened = false;
 
   for (let i = 0; i < count; i++) {
     const tile = tiles.nth(i);
     const parsed = parseItemLabel(await tile.innerText().catch(() => ''));
     // Nazwa musi pasowac dokladnie - "Repel" nie moze trafic w "Super Repel".
     if (!parsed || normalizeItemName(parsed.name) !== target) continue;
-
     await tile.click();
-    await page.waitForTimeout(1500);
-
-    // Jesli pojawilo sie potwierdzenie, klikamy je.
-    for (const text of USE_TEXTS) {
-      const btn = page.locator(`${USE_CONFIRM}:visible`, { hasText: text }).first();
-      if (await btn.count().catch(() => 0) > 0) {
-        await btn.click().catch(() => {});
-        await page.waitForTimeout(1500);
-        break;
-      }
-    }
-    return true;
+    opened = true;
+    break;
   }
 
-  return false;
+  if (!opened) {
+    log.warn(`Tepel/Repel: nie znalazlem kafelki "${itemName}".`);
+    return false;
+  }
+
+  // 2. Modal z przyciskiem "Uzyj". Pola ilosci nie wypelniamy -
+  //    puste znaczy "domyslnie 1", czyli jedna sztuka.
+  const modal = page.locator(`#plecak-${kind}${tier}`);
+  let scope = page;
+  try {
+    await modal.waitFor({ state: 'visible', timeout: 5000 });
+    scope = modal;
+  } catch {
+    log.debug(`Tepel/Repel: brak modala #plecak-${kind}${tier}, szukam przycisku na stronie.`);
+  }
+
+  if (!await clickButton(scope, 'Użyj')) {
+    log.warn(`Tepel/Repel: nie znalazlem przycisku "Użyj" dla ${itemName}.`);
+    return false;
+  }
+  await page.waitForTimeout(1500);
+
+  // 3. Ekran potwierdzenia ("Czy na pewno chcesz uzyc 1 x ...?").
+  if (!await clickButton(page, 'Potwierdź')) {
+    log.warn(`Tepel/Repel: nie znalazlem przycisku "Potwierdź" dla ${itemName}.`);
+    return false;
+  }
+  await page.waitForTimeout(2000);
+
+  return true;
 }
 
 // Aktywuje wskazany Tepel/Repel (kind: 'tepel'|'repel', tier: 1-3).
-// Wchodzi do plecaka, klika "Użyj", odświeża stan i wraca na stronę.
-// Zwraca true tylko wtedy, gdy przedmiot faktycznie kliknięto.
+// Wchodzi do plecaka, przechodzi sciezke kafelka -> "Użyj" -> "Potwierdź",
+// odswieza stan i wraca na strone. Zwraca true tylko po zatwierdzeniu.
 async function UseRepel(page, kind, tier, navigate) {
   const key = `${kind}-${tier}`;
   const name = REPEL_ITEM_NAMES[key];
@@ -300,25 +349,36 @@ async function UseRepel(page, kind, tier, navigate) {
       await page.waitForTimeout(1500);
     }
 
-    // Najpierw sprawdzamy stan — nie klikamy w coś, czego nie ma.
+    // Wejscie do plecaka to i tak dobry moment na odswiezenie stanu.
     const items = await readBackpackItems(page);
+    if (items) {
+      await saveEquipment(items, { autoRepelKind: kind, autoRepelTier: tier });
+    }
+
+    // Nie klikamy w cos, czego nie ma - bot jedzie dalej bez Tepela.
     const stock = items ? repelStock(items)[key] : undefined;
     if (stock !== undefined && stock <= 0) {
-      log.warn(`Tepel/Repel: brak ${name} w plecaku - pomijam aktywację.`);
+      log.warn(`Tepel/Repel: brak ${name} w plecaku - kontynuuję bez niego.`);
+      await sendNotification(`Brak ${name} w plecaku, wyprawa bez niego`);
       return false;
     }
 
-    // Tepele/Repele sa w zakladce "Uzywalne".
-    const clicked = await clickUseItem(page, name, TAB_NAMES.trener);
+    const clicked = await clickUseItem(page, name, kind, tier);
     if (!clicked) {
-      log.warn(`Tepel/Repel: nie znalazłem przycisku użycia dla ${name}.`);
+      log.warn(`Tepel/Repel: nie udało się użyć ${name} - kontynuuję bez niego.`);
+      await sendNotification(`Nie udało się użyć ${name}, wyprawa bez niego`);
       return false;
     }
 
     log.info(`Tepel/Repel: aktywowano ${name}.`);
-    // Po użyciu stan plecaka się zmienił — odczytujemy go ponownie.
-    // Alerty dotycza wlasnie tego przedmiotu, ktory wlasnie uzylismy.
-    await UpdateEquipment(page, { autoRepelKind: kind, autoRepelTier: tier });
+
+    // Po uzyciu jestesmy na stronie wyniku, nie w plecaku - zeby odswiezyc
+    // stan, trzeba do niego wrocic. Bez tego odczyt zlapalby inna strone.
+    if (typeof navigate === 'function') {
+      await navigate(page, 'Postać', 'Plecak');
+      await page.waitForTimeout(1500);
+      await UpdateEquipment(page, { autoRepelKind: kind, autoRepelTier: tier });
+    }
     return true;
   } catch (e) {
     log.warn('Tepel/Repel: błąd podczas aktywacji', { error: String(e) });
@@ -380,6 +440,7 @@ module.exports = {
   thresholdFor,
   repelStock,
   flattenItems,
+  saveEquipment,
   isRepelItem,
   activeRepelName,
   parseItemLabel,
