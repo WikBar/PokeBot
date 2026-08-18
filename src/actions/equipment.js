@@ -11,15 +11,44 @@ const EQUIPMENT_PATH = path.resolve(__dirname, '..', '..', 'config', 'equipment.
 // Domyślny próg, gdy przedmiot nie ma własnego w equipment.json.
 const DEFAULT_THRESHOLD = 10;
 
-// --- Selektory strony plecaka -------------------------------------------
-// Zebrane w jednym miejscu, żeby łatwo je dostroić do realnego HTML.
+// --- Strona plecaka -----------------------------------------------------
+// Podpis kafelki ma format "50 x MAX Repel"; przedmioty unikatowe
+// (np. "Blyszczacy Medalion Zal") nie maja liczby - to 1 sztuka.
 const BACKPACK = {
-  // Pojedyncza kafelka przedmiotu.
-  item: 'div.well.well-sm, div.przedmiot, div[class*="plecak"] div.well',
-  // Nazwa i liczba wewnątrz kafelki (fallback: cały tekst kafelki).
-  name: 'b, strong, .nazwa',
-  count: '.ilosc, .badge, .count',
+  // Kafelka przedmiotu - bierzemy tylko te z podpisem.
+  item: '.panel-body .col-xs-3, .panel-body .col-sm-3, .thumbnail',
+  // Zakladki plecaka; kazda ma osobna liste przedmiotow.
+  tab: '.nav-tabs a, ul.nav.nav-tabs li a',
 };
+
+// Zakladki, ktore czytamy. "Uzywalne" ma Tepele/Repele, "Pokeballe" - kule.
+const BACKPACK_TABS = ['Używalne', 'Pokeballe'];
+
+// Podpisy zakladek i naglowka. Gdyby selektor kafelek zlapal takze je,
+// "Pokeballe" (zakladka) nadpisaloby "Pokeballe" (przedmiot) wartoscia 1.
+const NOT_ITEMS = new Set([
+  'plecak', 'używalne', 'uzywalne', 'dla pokemona', 'pokeballe', 'ewolucyjne',
+  'tm', 'trzymane', 'pokeboxy', 'ulepszenia',
+]);
+
+// Rozbija podpis kafelki na nazwe i ilosc.
+// "50 x MAX Repel" -> { name: 'MAX Repel', value: 50 }
+// "Blyszczacy Medalion Zal" -> { name: '...', value: 1 }
+function parseItemLabel(text) {
+  const label = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!label) return null;
+
+  const m = label.match(/^([\d\s.,]+)\s*x\s*(.+)$/i);
+  if (m) {
+    const value = parseInt(m[1].replace(/[^\d]/g, ''), 10);
+    const name = m[2].trim();
+    if (!name || Number.isNaN(value)) return null;
+    return { name, value };
+  }
+
+  // Brak liczby = przedmiot unikatowy, mamy go 1 sztuke.
+  return { name: label, value: 1 };
+}
 
 // Nazwy Tepeli/Repeli w plecaku, wg klucza `${kind}-${tier}` — tego samego,
 // którym health.js opisuje aktywny przedmiot (z nazwy obrazka).
@@ -70,39 +99,51 @@ function thresholdFor(thresholds, name) {
   return Number.isFinite(fallback) ? fallback : DEFAULT_THRESHOLD;
 }
 
-// Czyta kafelki plecaka i zwraca { nazwa: liczba }.
-async function readBackpackItems(page) {
+// Czyta kafelki z aktualnie otwartej zakladki -> { nazwa: liczba }.
+async function readVisibleItems(page) {
   const items = {};
   const tiles = page.locator(BACKPACK.item);
   const count = await tiles.count().catch(() => 0);
-  if (count === 0) {
-    log.debug('Plecak: nie znaleziono kafelek przedmiotów.');
-    return null;
-  }
 
   for (let i = 0; i < count; i++) {
-    const tile = tiles.nth(i);
-    const raw = (await tile.innerText().catch(() => '')).trim();
-    if (!raw) continue;
+    const raw = await tiles.nth(i).innerText().catch(() => '');
+    const parsed = parseItemLabel(raw);
+    // Sam podpis zakladki (bez liczby) nie jest przedmiotem.
+    if (!parsed) continue;
+    if (parsed.value === 1 && NOT_ITEMS.has(normalizeItemName(parsed.name))) continue;
+    items[parsed.name] = parsed.value;
+  }
+  return items;
+}
 
-    // Nazwa: dedykowany element, a gdy go nie ma — pierwsza linia kafelki.
-    let name = await tile.locator(BACKPACK.name).first().innerText().catch(() => '');
-    name = (name || raw.split('\n')[0] || '').trim();
-    if (!name) continue;
+// Przechodzi po zakladkach plecaka i skleja ich zawartosc.
+// Zwraca { nazwa: liczba } albo null, gdy nic nie znaleziono.
+async function readBackpackItems(page) {
+  const items = {};
 
-    // Liczba: dedykowany element, a gdy go nie ma — pierwsza liczba w tekście.
-    let countText = await tile.locator(BACKPACK.count).first().innerText().catch(() => '');
-    if (!countText) {
-      const m = raw.match(/(\d[\d\s.,]*)\s*(szt|x)?\s*$/i) || raw.match(/\d[\d\s.,]*/);
-      countText = m ? m[0] : '';
+  // Najpierw to, co widac po wejsciu (domyslna zakladka).
+  Object.assign(items, await readVisibleItems(page));
+
+  for (const tabName of BACKPACK_TABS) {
+    try {
+      const tab = page.locator(BACKPACK.tab, { hasText: tabName }).first();
+      if (await tab.count().catch(() => 0) === 0) {
+        log.debug(`Plecak: brak zakladki "${tabName}".`);
+        continue;
+      }
+      await tab.click();
+      await page.waitForTimeout(1200);
+      Object.assign(items, await readVisibleItems(page));
+    } catch (e) {
+      log.debug(`Plecak: nie udalo sie otworzyc zakladki "${tabName}"`, { error: String(e) });
     }
-    const value = parseInt(String(countText).replace(/[^\d]/g, ''), 10);
-    if (Number.isNaN(value)) continue;
-
-    items[name] = value;
   }
 
-  return Object.keys(items).length > 0 ? items : null;
+  if (Object.keys(items).length === 0) {
+    log.debug('Plecak: nie znaleziono kafelek przedmiotow.');
+    return null;
+  }
+  return items;
 }
 
 // Odczytuje plecak, zapisuje stan do equipment.json i wysyła powiadomienie
@@ -146,12 +187,13 @@ async function UpdateEquipment(page) {
   return { items, low };
 }
 
-// Selektory przycisku użycia przedmiotu w plecaku (do dostrojenia po HTML).
-const USE_ITEM = 'button, a.btn, input[type="submit"]';
-const USE_TEXTS = ['Użyj', 'Uzyj', 'Aktywuj'];
+// Uzycie przedmiotu: na kafelce nie ma widocznego przycisku, wiec klikamy
+// sama kafelke, a potem ewentualne potwierdzenie w oknie modalnym.
+const USE_CONFIRM = 'button, a.btn, input[type="submit"]';
+const USE_TEXTS = ['Użyj', 'Uzyj', 'Aktywuj', 'Tak', 'Potwierdź', 'Potwierdz'];
 
-// Klika "Użyj" na kafelce danego przedmiotu w otwartym plecaku.
-// Zwraca true, gdy udało się kliknąć.
+// Klika kafelke wskazanego przedmiotu w otwartej zakladce plecaka
+// i zatwierdza ewentualne okno potwierdzenia. Zwraca true po kliknieciu.
 async function clickUseItem(page, itemName) {
   const target = normalizeItemName(itemName);
   const tiles = page.locator(BACKPACK.item);
@@ -159,26 +201,22 @@ async function clickUseItem(page, itemName) {
 
   for (let i = 0; i < count; i++) {
     const tile = tiles.nth(i);
-    const raw = (await tile.innerText().catch(() => '')).trim();
-    if (!raw) continue;
+    const parsed = parseItemLabel(await tile.innerText().catch(() => ''));
+    // Nazwa musi pasowac dokladnie - "Repel" nie moze trafic w "Super Repel".
+    if (!parsed || normalizeItemName(parsed.name) !== target) continue;
 
-    // Nazwa musi pasować dokładnie — "Repel" nie może trafić w "Super Repel".
-    let name = await tile.locator(BACKPACK.name).first().innerText().catch(() => '');
-    name = normalizeItemName(name || raw.split('\n')[0] || '');
-    if (name !== target) continue;
+    await tile.click();
+    await page.waitForTimeout(1500);
 
+    // Jesli pojawilo sie potwierdzenie, klikamy je.
     for (const text of USE_TEXTS) {
-      const btn = tile.locator(`${USE_ITEM}`, { hasText: text }).first();
+      const btn = page.locator(`${USE_CONFIRM}:visible`, { hasText: text }).first();
       if (await btn.count().catch(() => 0) > 0) {
-        await btn.click();
+        await btn.click().catch(() => {});
         await page.waitForTimeout(1500);
-        return true;
+        break;
       }
     }
-
-    // Brak podpisanego przycisku — próbujemy kliknąć samą kafelkę.
-    await tile.click().catch(() => {});
-    await page.waitForTimeout(1500);
     return true;
   }
 
@@ -279,6 +317,8 @@ module.exports = {
   loadEquipment,
   thresholdFor,
   repelStock,
+  parseItemLabel,
+  readVisibleItems,
   EQUIPMENT_PATH,
   BACKPACK,
   REPEL_ITEM_NAMES,

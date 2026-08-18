@@ -1,7 +1,29 @@
 {
   "items": {},
   "thresholds": {
-    "default": 10
+    "default": 0,
+    "Pokeballe": 200,
+    "Greatballe": 200,
+    "Nightballe": 200,
+    "Lureballe": 200,
+    "Friendballe": 100,
+    "Ultraballe": 100,
+    "Cherishballe": 100,
+    "Nestballe": 100,
+    "Levelballe": 100,
+    "Stunballe": 50,
+    "Safariballe": 50,
+    "Premierballe": 50,
+    "Jagoda Rawst": 500,
+    "Jagoda Cheri": 500,
+    "Napój Energetyczny": 5,
+    "Wiśniowy Napój Energetyczny": 10,
+    "Repel": 5,
+    "Super Repel": 5,
+    "MAX Repel": 10,
+    "Tepel": 5,
+    "Super Tepel": 5,
+    "MAX Tepel": 10
   },
   "lastUpdated": null
 }
