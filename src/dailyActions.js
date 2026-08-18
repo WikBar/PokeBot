@@ -10,6 +10,11 @@ const DAILY_RESET_HOUR = 0;
 const DAILY_RESET_MINUTE = 40;
 const DAILY_STATE_PATH = path.resolve(__dirname, '..', 'config', 'daily-state.json');
 
+// Liga: w poniedziałek walki dopiero od tej godziny.
+const LEAGUE_MONDAY_MIN_HOUR = 13;
+// Zabezpieczenie przed pętlą, gdyby licznik biletów nie malał.
+const MAX_LEAGUE_FIGHTS = 60;
+
 
 function getDailyRunKey(now = new Date()) {
   const shiftedDate = new Date(now);
@@ -318,22 +323,33 @@ async function getRemainingLeagueFights(page) {
   return remaining;
 }
 
+// W poniedziałek przed 13:00 liga jest pomijana (reset tygodnia).
+function isLeagueBlockedNow(now = new Date()) {
+  return now.getDay() === 1 && now.getHours() < LEAGUE_MONDAY_MIN_HOUR;
+}
+
 async function doDailyLeagueFights(page) {
+  if (isLeagueBlockedNow()) {
+    log.info(`Liga: poniedziałek przed ${LEAGUE_MONDAY_MIN_HOUR}:00 - pomijam, spróbuję później.`);
+    return null;   // null = nie oznaczaj jako wykonane, wróć do tego później
+  }
+
   await navigateViaMenu(page, 'Liga', 'Twoja Liga');
   await page.waitForTimeout(2000);
 
   let fought = 0;
 
-  while (true) {
-    
+  // Powtarzamy aż licznik biletów spadnie do zera. Limit iteracji chroni
+  // przed pętlą w nieskończoność, gdyby licznik nie chciał się zmniejszyć.
+  for (let i = 0; i < MAX_LEAGUE_FIGHTS; i++) {
     const remaining = await getRemainingLeagueFights(page);
     if (remaining === null) {
       log.info('Liga: nie znaleziono licznika walk - przerywam.');
       break;
     }
-    
+
     log.info(`Liga: pozostałe walki = ${remaining}.`);
-    if (remaining <= 0 || fought >= remaining ) break;
+    if (remaining <= 0) break;
 
     const nextFightBtn = page.locator('button:has-text("Rozpocznij następną walkę"), a:has-text("Rozpocznij następną walkę")').first();
     if (await nextFightBtn.count() === 0) {
@@ -364,8 +380,17 @@ async function doDailyLeagueFights(page) {
     fought++;
   }
 
-  log.info(`Liga: wykonano ${fought} walk.`);
-  return fought > 0 || (await getRemainingLeagueFights(page)) === 0;
+  // Wracamy na ekran ligi i sprawdzamy licznik — dopiero 0 oznacza,
+  // że dzienne walki są faktycznie wykonane.
+  await navigateViaMenu(page, 'Liga', 'Twoja Liga');
+  await page.waitForTimeout(2000);
+  const left = await getRemainingLeagueFights(page);
+
+  log.info(`Liga: wykonano ${fought} walk, pozostało ${left ?? '?'}.`);
+  if (left === 0) return true;
+
+  // Zostały bilety (np. brak przycisku, błąd strony) — spróbujemy ponownie.
+  return null;
 }
 
 async function doDailyAssociationPA(page) {
@@ -641,7 +666,10 @@ function areAllDailysDone() {
   const state = loadDailyState();
   const dayKey = getDailyRunKey();
   const keys = ['lottery', 'leagueFights', 'farm', 'pokemonCare', 'associationPA', 'paBerries'];
-  return keys.every(k => isActionDone(state, k, dayKey));
+  // Liga zablokowana (poniedziałek przed 13:00) nie blokuje reszty dailys.
+  return keys.every(k =>
+    isActionDone(state, k, dayKey) || (k === 'leagueFights' && isLeagueBlockedNow())
+  );
 }
 
 module.exports = {
@@ -650,4 +678,6 @@ module.exports = {
   runAssociationPAIfNeeded,
   runPABerriesIfNeeded,
   areAllDailysDone,
+  doDailyLeagueFights,
+  isLeagueBlockedNow,
 };
