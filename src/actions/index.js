@@ -5,6 +5,7 @@ const { CheckPA, CheckStorage } = require('./stats');
 const { SellPokemon } = require('./pokemon');
 const { login, isSessionAlive } = require('./auth');
 const { UpdateTeam, UpdateTeamIfDue } = require('./team');
+const { UpdateEquipment, OpenBackpackAndUpdate } = require('./equipment');
 
 module.exports = {
   ClickAdventure,
@@ -24,5 +25,7 @@ module.exports = {
   login,
   isSessionAlive,
   UpdateTeam,
-  UpdateTeamIfDue
+  UpdateTeamIfDue,
+  UpdateEquipment,
+  OpenBackpackAndUpdate
 };
