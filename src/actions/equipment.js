@@ -16,20 +16,22 @@ const DEFAULT_THRESHOLD = 10;
 // (np. "Blyszczacy Medalion Zal") nie maja liczby - to 1 sztuka.
 const BACKPACK = {
   // Kafelka przedmiotu - bierzemy tylko te z podpisem.
-  item: '.panel-body .col-xs-3, .panel-body .col-sm-3, .thumbnail',
-  // Zakladki plecaka; kazda ma osobna liste przedmiotow.
-  tab: '.nav-tabs a, ul.nav.nav-tabs li a',
+  item: '.col-xs-3, .col-sm-3, .thumbnail',
+  // Panel zakladki; wszystkie sa w DOM naraz, zakladki tylko przelaczaja widok.
+  pane: '.tab-pane[id^="plecaktab-"]',
 };
 
-// Zakladki, ktore czytamy. "Uzywalne" ma Tepele/Repele, "Pokeballe" - kule.
-const BACKPACK_TABS = ['Używalne', 'Pokeballe'];
-
-// Podpisy zakladek i naglowka. Gdyby selektor kafelek zlapal takze je,
-// "Pokeballe" (zakladka) nadpisaloby "Pokeballe" (przedmiot) wartoscia 1.
-const NOT_ITEMS = new Set([
-  'plecak', 'używalne', 'uzywalne', 'dla pokemona', 'pokeballe', 'ewolucyjne',
-  'tm', 'trzymane', 'pokeboxy', 'ulepszenia',
-]);
+// Panel #plecaktab-<id> -> nazwa grupy w equipment.json.
+const TAB_NAMES = {
+  trener: 'Używalne',
+  dla_pokemona: 'Dla Pokemona',
+  pokeballe: 'Pokeballe',
+  ewolucyjne: 'Ewolucyjne',
+  tm: 'TM',
+  trzymane: 'Trzymane',
+  pokeboxy: 'Pokeboxy',
+  ulepszenia: 'Ulepszenia',
+};
 
 // Rozbija podpis kafelki na nazwe i ilosc.
 // "50 x MAX Repel" -> { name: 'MAX Repel', value: 50 }
@@ -67,11 +69,22 @@ function normalizeItemName(name) {
   return String(name || '').toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
+// Przedmioty sa pogrupowane po zakladkach: { "Pokeballe": { "Pokeballe": 1717 } }.
+// Do progow i wyszukiwania potrzebujemy plaskiej mapy { nazwa: ilosc }.
+function flattenItems(items) {
+  const flat = {};
+  for (const [key, value] of Object.entries(items || {})) {
+    if (value && typeof value === 'object') Object.assign(flat, value);
+    else flat[key] = value;          // zgodnosc ze starym, plaskim formatem
+  }
+  return flat;
+}
+
 // Stan Tepeli/Repeli na podstawie zawartości plecaka:
 // { 'repel-1': 12, 'tepel-3': 0, ... }. Brak wpisu = 0 sztuk.
 function repelStock(items) {
   const byNormalized = {};
-  for (const [name, value] of Object.entries(items || {})) {
+  for (const [name, value] of Object.entries(flattenItems(items))) {
     byNormalized[normalizeItemName(name)] = value;
   }
   const stock = {};
@@ -99,51 +112,49 @@ function thresholdFor(thresholds, name) {
   return Number.isFinite(fallback) ? fallback : DEFAULT_THRESHOLD;
 }
 
-// Czyta kafelki z aktualnie otwartej zakladki -> { nazwa: liczba }.
-async function readVisibleItems(page) {
+// Czyta kafelki z podanego kontenera -> { nazwa: liczba }.
+async function readVisibleItems(scope) {
   const items = {};
-  const tiles = page.locator(BACKPACK.item);
+  const tiles = scope.locator(BACKPACK.item);
   const count = await tiles.count().catch(() => 0);
 
   for (let i = 0; i < count; i++) {
     const raw = await tiles.nth(i).innerText().catch(() => '');
     const parsed = parseItemLabel(raw);
-    // Sam podpis zakladki (bez liczby) nie jest przedmiotem.
-    if (!parsed) continue;
-    if (parsed.value === 1 && NOT_ITEMS.has(normalizeItemName(parsed.name))) continue;
-    items[parsed.name] = parsed.value;
+    if (parsed) items[parsed.name] = parsed.value;
   }
   return items;
 }
 
-// Przechodzi po zakladkach plecaka i skleja ich zawartosc.
-// Zwraca { nazwa: liczba } albo null, gdy nic nie znaleziono.
+// Czyta plecak z podzialem na zakladki:
+//   { "Używalne": { "MAX Repel": 50 }, "Pokeballe": { ... } }
+// Wszystkie panele sa w DOM naraz, wiec nie trzeba klikac w zakladki.
+// Zwraca null, gdy nic nie znaleziono.
 async function readBackpackItems(page) {
-  const items = {};
+  const groups = {};
+  const panes = page.locator(BACKPACK.pane);
+  const count = await panes.count().catch(() => 0);
 
-  // Najpierw to, co widac po wejsciu (domyslna zakladka).
-  Object.assign(items, await readVisibleItems(page));
+  for (let i = 0; i < count; i++) {
+    const pane = panes.nth(i);
+    const id = (await pane.getAttribute('id').catch(() => '')) || '';
+    const key = id.replace(/^plecaktab-/, '');
+    const name = TAB_NAMES[key] || key || `Zakładka ${i + 1}`;
 
-  for (const tabName of BACKPACK_TABS) {
-    try {
-      const tab = page.locator(BACKPACK.tab, { hasText: tabName }).first();
-      if (await tab.count().catch(() => 0) === 0) {
-        log.debug(`Plecak: brak zakladki "${tabName}".`);
-        continue;
-      }
-      await tab.click();
-      await page.waitForTimeout(1200);
-      Object.assign(items, await readVisibleItems(page));
-    } catch (e) {
-      log.debug(`Plecak: nie udalo sie otworzyc zakladki "${tabName}"`, { error: String(e) });
+    const found = await readVisibleItems(pane);
+    if (Object.keys(found).length > 0) groups[name] = found;
+  }
+
+  if (Object.keys(groups).length === 0) {
+    // Brak paneli - stary uklad strony; czytamy plasko, jak dotad.
+    const flat = await readVisibleItems(page);
+    if (Object.keys(flat).length === 0) {
+      log.debug('Plecak: nie znaleziono kafelek przedmiotow.');
+      return null;
     }
+    return flat;
   }
-
-  if (Object.keys(items).length === 0) {
-    log.debug('Plecak: nie znaleziono kafelek przedmiotow.');
-    return null;
-  }
-  return items;
+  return groups;
 }
 
 // Odczytuje plecak, zapisuje stan do equipment.json i wysyła powiadomienie
@@ -158,21 +169,27 @@ async function UpdateEquipment(page) {
   const { items: previous, thresholds } = await loadEquipment();
 
   const lastUpdated = new Date().toISOString();
-  await saveToFile(EQUIPMENT_PATH, { items, thresholds, lastUpdated });
-  log.info(`Plecak: zapisano ${Object.keys(items).length} przedmiotów.`);
+  // Kolejnosc kluczy ma znaczenie tylko dla czytelnosci pliku:
+  // progi na gorze, bo to je sie recznie edytuje.
+  await saveToFile(EQUIPMENT_PATH, { thresholds, items, lastUpdated });
+  // items jest pogrupowane po zakladkach - progi liczymy na plaskiej mapie.
+  const flat = flattenItems(items);
+  const flatPrevious = flattenItems(previous);
+  log.info(`Plecak: zapisano ${Object.keys(flat).length} przedmiotów w ${Object.keys(items).length} zakładkach.`);
 
   // Panel web potrzebuje stanu plecaka, żeby wiedzieć, których
   // Tepeli/Repeli w ogóle nie ma i zablokować ich aktywację.
-  state.setEquipment({ items, repels: repelStock(items), lastUpdated });
+  // Wysyłamy płaską mapę — grupy są tylko dla czytelności pliku.
+  state.setEquipment({ items: flat, groups: items, repels: repelStock(items), lastUpdated });
 
   // Powiadamiamy tylko przy spadku poniżej progu — bez tego alert
   // powtarzałby się przy każdym wejściu do plecaka.
   const low = [];
-  for (const [name, value] of Object.entries(items)) {
+  for (const [name, value] of Object.entries(flat)) {
     const limit = thresholdFor(thresholds, name);
     if (value > limit) continue;
 
-    const before = previous?.[name];
+    const before = flatPrevious?.[name];
     const wasAbove = before === undefined || before > limit;
     low.push({ name, value, limit, notified: wasAbove });
 
@@ -184,7 +201,7 @@ async function UpdateEquipment(page) {
     }
   }
 
-  return { items, low };
+  return { items, flat, low };
 }
 
 // Uzycie przedmiotu: na kafelce nie ma widocznego przycisku, wiec klikamy
@@ -192,11 +209,29 @@ async function UpdateEquipment(page) {
 const USE_CONFIRM = 'button, a.btn, input[type="submit"]';
 const USE_TEXTS = ['Użyj', 'Uzyj', 'Aktywuj', 'Tak', 'Potwierdź', 'Potwierdz'];
 
-// Klika kafelke wskazanego przedmiotu w otwartej zakladce plecaka
-// i zatwierdza ewentualne okno potwierdzenia. Zwraca true po kliknieciu.
-async function clickUseItem(page, itemName) {
+// Otwiera zakladke plecaka o podanej nazwie (np. "Używalne").
+// Panele sa w DOM od razu, ale kliknac mozna tylko w widoczna kafelke.
+async function openTab(page, tabName) {
+  try {
+    const tab = page.locator('.nav-tabs a', { hasText: tabName }).first();
+    if (await tab.count().catch(() => 0) === 0) return false;
+    await tab.click();
+    await page.waitForTimeout(800);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Klika kafelke wskazanego przedmiotu i zatwierdza ewentualne okno
+// potwierdzenia. Zwraca true po kliknieciu.
+async function clickUseItem(page, itemName, tabName) {
   const target = normalizeItemName(itemName);
-  const tiles = page.locator(BACKPACK.item);
+  if (tabName) await openTab(page, tabName);
+
+  // Tylko widoczne kafelki - ten sam przedmiot moze byc w DOM w ukrytym
+  // panelu innej zakladki, a w taki nie da sie kliknac.
+  const tiles = page.locator(`${BACKPACK.item}:visible`);
   const count = await tiles.count().catch(() => 0);
 
   for (let i = 0; i < count; i++) {
@@ -248,7 +283,8 @@ async function UseRepel(page, kind, tier, navigate) {
       return false;
     }
 
-    const clicked = await clickUseItem(page, name);
+    // Tepele/Repele sa w zakladce "Uzywalne".
+    const clicked = await clickUseItem(page, name, TAB_NAMES.trener);
     if (!clicked) {
       log.warn(`Tepel/Repel: nie znalazłem przycisku użycia dla ${name}.`);
       return false;
@@ -276,7 +312,7 @@ async function UseRepel(page, kind, tier, navigate) {
 async function PublishSavedEquipment() {
   try {
     const { items, lastUpdated } = await loadEquipment();
-    state.setEquipment({ items, repels: repelStock(items), lastUpdated });
+    state.setEquipment({ items: flattenItems(items), groups: items, repels: repelStock(items), lastUpdated });
     return true;
   } catch (e) {
     log.debug('Plecak: nie udało się wczytać zapisanego stanu', { error: String(e) });
@@ -317,6 +353,7 @@ module.exports = {
   loadEquipment,
   thresholdFor,
   repelStock,
+  flattenItems,
   parseItemLabel,
   readVisibleItems,
   EQUIPMENT_PATH,
