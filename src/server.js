@@ -5,6 +5,7 @@ const { loadFromFile, saveToFile } = require('./utils/fileOperations');
 const state = require('./state');
 const { logger } = require('./utils/logger');
 const { setForceHospital } = require('./state');
+const { REPEL_ITEM_NAMES } = require('./actions/equipment');
 
 const log = logger.child({ module: 'server' });
 
@@ -17,6 +18,7 @@ const ALLOWED_CONFIG_KEYS = new Set([
   'region', 'adventureNr', 'randomAdventure',
   'pokemonIndex', 'SecondPokemonIndex', 'paBuffer', 'sellablePokemon', 'protectedPokemon',
   'sellThreshold', 'limitsEnabled', 'diff3Keep', 'diff4Keep',
+  'autoRepelEnabled', 'autoRepelKind', 'autoRepelTier', 'autoRepelMin',
   'diff3CatchPokemons', 'diff4CatchPokemons', 'diff5CatchPokemons', 'diff0CatchPokemons'
 ]);
 
@@ -137,8 +139,23 @@ function startServer() {
     else if (action === 'stop')     { state.setEmergencyStop(true); }
     else if (action === 'hospital') { setForceHospital(true); }
     else if (action === 'updateTeam') { state.setForceTeamUpdate(true); }
-    else if (action === 'useTepel')   { state.setUseRepelRequest('tepel'); }
-    else if (action === 'useRepel')   { state.setUseRepelRequest('repel'); }
+    else if (action === 'useTepel' || action === 'useRepel') {
+      // Panel przysyła poziom (1-3); bez niego przyjmujemy podstawowy.
+      const kind = action === 'useTepel' ? 'tepel' : 'repel';
+      const tier = parseInt(req.body.tier, 10) || 1;
+      const key = `${kind}-${tier}`;
+      if (!REPEL_ITEM_NAMES[key]) {
+        return res.status(400).json({ ok: false, error: `Nieznany przedmiot: ${key}` });
+      }
+      // Nie pozwalamy aktywować czegoś, czego nie ma w plecaku — panel
+      // blokuje takie przyciski, ale zapytanie może przyjść też skądinąd.
+      const stock = state.getState().equipment?.repels?.[key];
+      if (stock !== undefined && stock <= 0) {
+        log.warn('Odrzucono aktywację - brak w plecaku', { key });
+        return res.status(409).json({ ok: false, error: `Brak w plecaku: ${REPEL_ITEM_NAMES[key]}` });
+      }
+      state.setUseRepelRequest({ kind, tier, name: REPEL_ITEM_NAMES[key] });
+    }
     else { return res.status(400).json({ ok: false, error: `Unknown action: ${action}` }); }
     const { isPaused, emergencyStop, forceHospital, forceTeamUpdate, useRepelRequest } = state.getState();
     log.info('Control action received', { action });

@@ -3,6 +3,7 @@ const _state = {
   hp:            { current: 0, max: 100 },
   storage:       { current: 0, max: 0 },
   repel:         null,          // licznik Tepela/Repela; null = nieaktywny
+  equipment:     null,          // { items: { nazwa: ilość }, lastUpdated }
   activity:      { active: false },
   isRunning:     true,
   isPaused:      false,
@@ -50,8 +51,9 @@ function setForceHospital(bool) { _state.forceHospital = bool; _notifySseClients
 function setForceTeamUpdate(bool) { _state.forceTeamUpdate = bool; _notifySseClients(); }
 function setTeamLastUpdated(iso)  { _state.teamLastUpdated = iso; _notifySseClients(); }
 function setUseRepelRequest(kind) { _state.useRepelRequest = kind; _notifySseClients(); }
+function setEquipment(eq)         { _state.equipment = eq;         _notifySseClients(); }
 
 function subscribeSse(res)   { _sseClients.add(res); }
 function unsubscribeSse(res) { _sseClients.delete(res); }
 
-module.exports = { getState, updateStats, addLog, setPaused, setEmergencyStop, setForceHospital, setForceTeamUpdate, setTeamLastUpdated, setUseRepelRequest, subscribeSse, unsubscribeSse };
+module.exports = { getState, updateStats, addLog, setPaused, setEmergencyStop, setForceHospital, setForceTeamUpdate, setTeamLastUpdated, setUseRepelRequest, setEquipment, subscribeSse, unsubscribeSse };

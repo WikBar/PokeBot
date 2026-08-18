@@ -2,6 +2,7 @@ const path = require('path');
 const { logger } = require('../utils/logger');
 const { loadFromFile, saveToFile } = require('../utils/fileOperations');
 const { sendNotification } = require('../utils/notifier');
+const state = require('../state');
 
 const log = logger.child({ module: 'equipment' });
 
@@ -19,6 +20,38 @@ const BACKPACK = {
   name: 'b, strong, .nazwa',
   count: '.ilosc, .badge, .count',
 };
+
+// Nazwy Tepeli/Repeli w plecaku, wg klucza `${kind}-${tier}` — tego samego,
+// którym health.js opisuje aktywny przedmiot (z nazwy obrazka).
+const REPEL_ITEM_NAMES = {
+  'repel-1': 'Repel',
+  'repel-2': 'Super Repel',
+  'repel-3': 'MAX Repel',
+  'tepel-1': 'Tepel',
+  'tepel-2': 'Super Tepel',
+  'tepel-3': 'MAX Tepel',
+};
+
+// Nazwy z plecaka bywają zapisane różnie (wielkość liter, odstępy),
+// więc porównujemy je po znormalizowanej formie.
+function normalizeItemName(name) {
+  return String(name || '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+// Stan Tepeli/Repeli na podstawie zawartości plecaka:
+// { 'repel-1': 12, 'tepel-3': 0, ... }. Brak wpisu = 0 sztuk.
+function repelStock(items) {
+  const byNormalized = {};
+  for (const [name, value] of Object.entries(items || {})) {
+    byNormalized[normalizeItemName(name)] = value;
+  }
+  const stock = {};
+  for (const [key, label] of Object.entries(REPEL_ITEM_NAMES)) {
+    const value = byNormalized[normalizeItemName(label)];
+    stock[key] = Number.isFinite(Number(value)) ? Number(value) : 0;
+  }
+  return stock;
+}
 
 async function loadEquipment() {
   const data = await loadFromFile(EQUIPMENT_PATH);
@@ -83,12 +116,13 @@ async function UpdateEquipment(page) {
 
   const { items: previous, thresholds } = await loadEquipment();
 
-  await saveToFile(EQUIPMENT_PATH, {
-    items,
-    thresholds,
-    lastUpdated: new Date().toISOString(),
-  });
+  const lastUpdated = new Date().toISOString();
+  await saveToFile(EQUIPMENT_PATH, { items, thresholds, lastUpdated });
   log.info(`Plecak: zapisano ${Object.keys(items).length} przedmiotów.`);
+
+  // Panel web potrzebuje stanu plecaka, żeby wiedzieć, których
+  // Tepeli/Repeli w ogóle nie ma i zablokować ich aktywację.
+  state.setEquipment({ items, repels: repelStock(items), lastUpdated });
 
   // Powiadamiamy tylko przy spadku poniżej progu — bez tego alert
   // powtarzałby się przy każdym wejściu do plecaka.
@@ -110,6 +144,106 @@ async function UpdateEquipment(page) {
   }
 
   return { items, low };
+}
+
+// Selektory przycisku użycia przedmiotu w plecaku (do dostrojenia po HTML).
+const USE_ITEM = 'button, a.btn, input[type="submit"]';
+const USE_TEXTS = ['Użyj', 'Uzyj', 'Aktywuj'];
+
+// Klika "Użyj" na kafelce danego przedmiotu w otwartym plecaku.
+// Zwraca true, gdy udało się kliknąć.
+async function clickUseItem(page, itemName) {
+  const target = normalizeItemName(itemName);
+  const tiles = page.locator(BACKPACK.item);
+  const count = await tiles.count().catch(() => 0);
+
+  for (let i = 0; i < count; i++) {
+    const tile = tiles.nth(i);
+    const raw = (await tile.innerText().catch(() => '')).trim();
+    if (!raw) continue;
+
+    // Nazwa musi pasować dokładnie — "Repel" nie może trafić w "Super Repel".
+    let name = await tile.locator(BACKPACK.name).first().innerText().catch(() => '');
+    name = normalizeItemName(name || raw.split('\n')[0] || '');
+    if (name !== target) continue;
+
+    for (const text of USE_TEXTS) {
+      const btn = tile.locator(`${USE_ITEM}`, { hasText: text }).first();
+      if (await btn.count().catch(() => 0) > 0) {
+        await btn.click();
+        await page.waitForTimeout(1500);
+        return true;
+      }
+    }
+
+    // Brak podpisanego przycisku — próbujemy kliknąć samą kafelkę.
+    await tile.click().catch(() => {});
+    await page.waitForTimeout(1500);
+    return true;
+  }
+
+  return false;
+}
+
+// Aktywuje wskazany Tepel/Repel (kind: 'tepel'|'repel', tier: 1-3).
+// Wchodzi do plecaka, klika "Użyj", odświeża stan i wraca na stronę.
+// Zwraca true tylko wtedy, gdy przedmiot faktycznie kliknięto.
+async function UseRepel(page, kind, tier, navigate) {
+  const key = `${kind}-${tier}`;
+  const name = REPEL_ITEM_NAMES[key];
+  if (!name) {
+    log.warn(`Tepel/Repel: nieznany przedmiot "${key}".`);
+    return false;
+  }
+
+  try {
+    if (typeof navigate === 'function') {
+      await navigate(page, 'Postać', 'Plecak');
+      await page.waitForTimeout(1500);
+    }
+
+    // Najpierw sprawdzamy stan — nie klikamy w coś, czego nie ma.
+    const items = await readBackpackItems(page);
+    const stock = items ? repelStock(items)[key] : undefined;
+    if (stock !== undefined && stock <= 0) {
+      log.warn(`Tepel/Repel: brak ${name} w plecaku - pomijam aktywację.`);
+      return false;
+    }
+
+    const clicked = await clickUseItem(page, name);
+    if (!clicked) {
+      log.warn(`Tepel/Repel: nie znalazłem przycisku użycia dla ${name}.`);
+      return false;
+    }
+
+    log.info(`Tepel/Repel: aktywowano ${name}.`);
+    // Po użyciu stan plecaka się zmienił — odczytujemy go ponownie.
+    await UpdateEquipment(page);
+    return true;
+  } catch (e) {
+    log.warn('Tepel/Repel: błąd podczas aktywacji', { error: String(e) });
+    return false;
+  } finally {
+    try {
+      await page.reload();
+      await page.waitForTimeout(1000);
+    } catch (e) {
+      log.debug('Tepel/Repel: nie udało się odświeżyć strony', { error: String(e) });
+    }
+  }
+}
+
+// Wypycha do panelu ostatnio zapisany stan plecaka (bez wchodzenia do gry).
+// Używane przy starcie bota, żeby panel nie był pusty do pierwszej wizyty.
+async function PublishSavedEquipment() {
+  try {
+    const { items, lastUpdated } = await loadEquipment();
+    state.setEquipment({ items, repels: repelStock(items), lastUpdated });
+    return true;
+  } catch (e) {
+    log.debug('Plecak: nie udało się wczytać zapisanego stanu', { error: String(e) });
+    return false;
+  }
 }
 
 // Wchodzi do plecaka (Postać → Plecak) i aktualizuje stan.
@@ -139,9 +273,13 @@ async function OpenBackpackAndUpdate(page, navigate) {
 module.exports = {
   UpdateEquipment,
   OpenBackpackAndUpdate,
+  PublishSavedEquipment,
+  UseRepel,
   readBackpackItems,
   loadEquipment,
   thresholdFor,
+  repelStock,
   EQUIPMENT_PATH,
   BACKPACK,
+  REPEL_ITEM_NAMES,
 };

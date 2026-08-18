@@ -10,7 +10,7 @@ const { loadFromFile, saveToFile } = require('./utils/fileOperations');
 const { CheckIfGoodEvent,CheckIfBadEvent, CheckActivity}=require('./events');
 const path = require('path');
 const { runDailyActions, runCareIfNeeded, runAssociationPAIfNeeded, runPABerriesIfNeeded, areAllDailysDone, navigateViaMenu } = require('./dailyActions');
-const { OpenBackpackAndUpdate } = require('./actions/equipment');
+const { OpenBackpackAndUpdate, PublishSavedEquipment, UseRepel } = require('./actions/equipment');
 const { logger } = require('./utils/logger');
 const { startServer } = require('./server');
 const state = require('./state');
@@ -53,12 +53,68 @@ const SAME_TYPE_MAX_LV = 50;
 
   startServer();
 
+  // Panel od razu pokazuje ostatnio znany stan plecaka,
+  // zanim bot po raz pierwszy do niego zajrzy.
+  await PublishSavedEquipment();
+
   const loggedIn = await login(page, credentials);
   if (!loggedIn) {
     log.error('Logowanie nieudane. Sprawdź dane logowania w pliku .env.');
     await browser.close();
     return;
   }
+
+// Domyślne ustawienia auto-Tepela/Repela, gdy brak ich w config.json.
+const AUTO_REPEL_DEFAULT_MIN = 2;
+
+// Aktywuje Tepel/Repel, gdy licznik spadł poniżej progu, albo gdy panel web
+// zlecił użycie konkretnego przedmiotu. Uruchamiane tuż po sprawdzeniu HP,
+// przed wysłaniem na wyprawę. Nigdy nie przerywa głównej pętli.
+async function AutoUseRepelIfNeeded(page, accountConfig) {
+  try {
+    const { repel, useRepelRequest, equipment } = state.getState();
+
+    // Zlecenie z panelu ma pierwszeństwo przed automatem.
+    if (useRepelRequest) {
+      const { kind, tier } = useRepelRequest;
+      state.setUseRepelRequest(null);   // czyścimy od razu, by nie powtórzyć
+      log.info(`Tepel/Repel: zlecenie z panelu - ${kind} ${tier}.`);
+      await UseRepel(page, kind, tier, navigateViaMenu);
+      return;
+    }
+
+    if (accountConfig.autoRepelEnabled === false) return;
+
+    const min = Number.isFinite(Number(accountConfig.autoRepelMin))
+      ? Number(accountConfig.autoRepelMin)
+      : AUTO_REPEL_DEFAULT_MIN;
+
+    // Brak licznika = nic nie działa, więc też odnawiamy.
+    const value = repel?.value;
+    if (value !== undefined && value !== null && value >= min) return;
+
+    const kind = accountConfig.autoRepelKind === 'tepel' ? 'tepel' : 'repel';
+    const tier = Number(accountConfig.autoRepelTier) || 1;
+
+    // Wybrany poziom może się skończyć — wtedy bierzemy inny, jaki mamy.
+    const stock = equipment?.repels;
+    let useTier = tier;
+    if (stock && !(stock[`${kind}-${tier}`] > 0)) {
+      const fallback = [1, 2, 3].find(t => stock[`${kind}-${t}`] > 0);
+      if (!fallback) {
+        log.warn(`Tepel/Repel: brak ${kind}i w plecaku - pomijam aktywację.`);
+        return;
+      }
+      log.info(`Tepel/Repel: brak poziomu ${tier}, używam ${fallback}.`);
+      useTier = fallback;
+    }
+
+    log.info(`Tepel/Repel: licznik ${value ?? 'brak'} < ${min} - aktywuję.`);
+    await UseRepel(page, kind, useTier, navigateViaMenu);
+  } catch (e) {
+    log.warn('Tepel/Repel: auto-aktywacja nieudana', { error: String(e) });
+  }
+}
 
 // Dokleja pokemona do listy w config.json bez nadpisywania zmian z panelu web.
 // Czyta świeży plik z dysku, dopisuje tylko do wskazanej listy, zapisuje i
@@ -188,6 +244,10 @@ while (true){
       state.updateStats({ hp: { current: hpAfterHospital.currentHP, max: hpAfterHospital.maxHP }, repel: hpAfterHospital.repel });
     }
     
+    // Tepel/Repel odnawiamy tuż przed wyprawą — licznik jest już świeży
+    // po odczycie HP powyżej (oba pola czytane są z tego samego kontenera).
+    await AutoUseRepelIfNeeded(page, accountConfig);
+
     await runCareIfNeeded(page);
     state.updateStats({ lastEvent: 'adventure_started' });
     await ClickAdventure(page,accountConfig,locations);

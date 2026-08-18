@@ -1,5 +1,5 @@
 {
-  "region": "Unova",
+  "region": "Alola",
   "adventureNr": 2,
   "randomAdventure": false,
   "pokemonIndex": 3,
@@ -10,6 +10,10 @@
   "limitsEnabled": true,
   "diff3Keep": 5,
   "diff4Keep": 15,
+  "autoRepelEnabled": true,
+  "autoRepelKind": "repel",
+  "autoRepelTier": 1,
+  "autoRepelMin": 2,
   "sellablePokemon": [
     "Zubat",
     "Magikarp",
