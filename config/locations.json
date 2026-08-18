@@ -1,71 +1,315 @@
 {
   "Kanto": {
-    "1": { "name": "Łąka", "requiredPA": 8, "isSpecial": false },
-    "2": { "name": "Las", "requiredPA": 9 , "isSpecial": false },
-    "3": { "name": "Wybrzeże", "requiredPA": 8, "isSpecial": false  },
-    "4": { "name": "Morze", "requiredPA": 8 , "isSpecial": false },
-    "5": { "name": "Góry", "requiredPA": 16 , "isSpecial": false },
-    "6": { "name": "Jaskinie", "requiredPA": 14 ,"isSpecial": false },
-    "7": { "name": "Miasto", "requiredPA": 16 , "isSpecial": false },
-    "8": { "name": "Safari", "requiredPA": 14 , "isSpecial": true}
+    "1": {
+      "name": "Łąka",
+      "requiredPA": 8,
+      "isSpecial": false
+    },
+    "2": {
+      "name": "Las",
+      "requiredPA": 9,
+      "isSpecial": false
+    },
+    "3": {
+      "name": "Wybrzeże",
+      "requiredPA": 8,
+      "isSpecial": false
+    },
+    "4": {
+      "name": "Morze",
+      "requiredPA": 8,
+      "isSpecial": false
+    },
+    "5": {
+      "name": "Góry",
+      "requiredPA": 16,
+      "isSpecial": false
+    },
+    "6": {
+      "name": "Jaskinie",
+      "requiredPA": 14,
+      "isSpecial": false
+    },
+    "7": {
+      "name": "Miasto",
+      "requiredPA": 16,
+      "isSpecial": false
+    },
+    "8": {
+      "name": "Safari",
+      "requiredPA": 14,
+      "isSpecial": true
+    }
   },
   "Johto": {
-    "1": { "name": "Równina", "requiredPA": 9 , "isSpecial": false },
-    "2": { "name": "Puszcza", "requiredPA": 14 , "isSpecial": false },
-    "3": { "name": "Jezioro", "requiredPA": 9 , "isSpecial": false },
-    "4": { "name": "Wulkan", "requiredPA": 16 , "isSpecial": false },
-    "5": { "name": "Ruiny Miasta", "requiredPA": 12 , "isSpecial": false },
-    "6": { "name": "Park Narodowy", "requiredPA": 14 , "isSpecial": true}
+    "1": {
+      "name": "Równina",
+      "requiredPA": 9,
+      "isSpecial": false
+    },
+    "2": {
+      "name": "Puszcza",
+      "requiredPA": 14,
+      "isSpecial": false
+    },
+    "3": {
+      "name": "Jezioro",
+      "requiredPA": 9,
+      "isSpecial": false
+    },
+    "4": {
+      "name": "Wulkan",
+      "requiredPA": 16,
+      "isSpecial": false
+    },
+    "5": {
+      "name": "Ruiny Miasta",
+      "requiredPA": 12,
+      "isSpecial": false
+    },
+    "6": {
+      "name": "Park Narodowy",
+      "requiredPA": 14,
+      "isSpecial": true
+    }
   },
   "Hoenn": {
-    "1": { "name": "Alejka Spacerowa", "requiredPA": 9 , "isSpecial": false },
-    "2": { "name": "Pustynia", "requiredPA": 18 , "isSpecial": false },
-    "3": { "name": "Głębina", "requiredPA": 10 , "isSpecial": false },
-    "4": { "name": "Ogród", "requiredPA": 10 , "isSpecial": false },
-    "5": { "name": "Opuszczona Elektrownia", "requiredPA": 15, "isSpecial": false  },
-    "6": { "name": "Nawiedzona Wieża", "requiredPA": 15, "isSpecial": false  },
-    "7": { "name": "Meteorytowa Góra", "requiredPA": 15, "isSpecial": true}
+    "1": {
+      "name": "Alejka Spacerowa",
+      "requiredPA": 9,
+      "isSpecial": false
+    },
+    "2": {
+      "name": "Pustynia",
+      "requiredPA": 18,
+      "isSpecial": false
+    },
+    "3": {
+      "name": "Głębina",
+      "requiredPA": 10,
+      "isSpecial": false
+    },
+    "4": {
+      "name": "Ogród",
+      "requiredPA": 10,
+      "isSpecial": false
+    },
+    "5": {
+      "name": "Opuszczona Elektrownia",
+      "requiredPA": 15,
+      "isSpecial": false
+    },
+    "6": {
+      "name": "Nawiedzona Wieża",
+      "requiredPA": 15,
+      "isSpecial": false
+    },
+    "7": {
+      "name": "Meteorytowa Góra",
+      "requiredPA": 15,
+      "isSpecial": true
+    }
   },
   "Sinnoh": {
-    "1": { "name": "Gęsty Zagajnik", "requiredPA": 10 , "isSpecial": false },
-    "2": { "name": "Dolina Wiatraków", "requiredPA": 15 , "isSpecial": false },
-    "3": { "name": "Koronny Szczyt", "requiredPA": 12, "isSpecial": false },
-    "4": { "name": "Portójny Staw", "requiredPA": 10 , "isSpecial": false },
-    "5": { "name": "Pustynia Lodowa", "requiredPA": 20, "isSpecial": false  },
-    "6": { "name": "Wielkie Bagna", "requiredPA": 15, "isSpecial": true  }
+    "1": {
+      "name": "Gęsty Zagajnik",
+      "requiredPA": 10,
+      "isSpecial": false
+    },
+    "2": {
+      "name": "Dolina Wiatraków",
+      "requiredPA": 15,
+      "isSpecial": false
+    },
+    "3": {
+      "name": "Koronny Szczyt",
+      "requiredPA": 12,
+      "isSpecial": false
+    },
+    "4": {
+      "name": "Portójny Staw",
+      "requiredPA": 10,
+      "isSpecial": false
+    },
+    "5": {
+      "name": "Pustynia Lodowa",
+      "requiredPA": 20,
+      "isSpecial": false
+    },
+    "6": {
+      "name": "Wielkie Bagna",
+      "requiredPA": 15,
+      "isSpecial": true
+    }
   },
   "Unova": {
-    "1": { "name": "Ranczo", "requiredPA": 9 , "isSpecial": false },
-    "2": { "name": "Most Zwodzony Driftveil", "requiredPA": 9 , "isSpecial": false },
-    "3": { "name": "Cudowny Most", "requiredPA": 14 , "isSpecial": false },
-    "4": { "name": "Strzelisty Most", "requiredPA": 9 , "isSpecial": false },
-    "5": { "name": "Most Sieci Metra", "requiredPA": 18, "isSpecial": false  },
-    "6": { "name": "Wiejski Most", "requiredPA": 12, "isSpecial": false  },
-    "7": { "name": "Jaskinia Elektrokamieni", "requiredPA": 9, "isSpecial": false  },
-    "8": { "name": "Reliktowy Zamek", "requiredPA": 14, "isSpecial": true}
+    "1": {
+      "name": "Ranczo",
+      "requiredPA": 9,
+      "isSpecial": false
+    },
+    "2": {
+      "name": "Most Zwodzony Driftveil",
+      "requiredPA": 9,
+      "isSpecial": false
+    },
+    "3": {
+      "name": "Cudowny Most",
+      "requiredPA": 14,
+      "isSpecial": false
+    },
+    "4": {
+      "name": "Strzelisty Most",
+      "requiredPA": 9,
+      "isSpecial": false
+    },
+    "5": {
+      "name": "Most Sieci Metra",
+      "requiredPA": 18,
+      "isSpecial": false
+    },
+    "6": {
+      "name": "Wiejski Most",
+      "requiredPA": 12,
+      "isSpecial": false
+    },
+    "7": {
+      "name": "Jaskinia Elektrokamieni",
+      "requiredPA": 9,
+      "isSpecial": false
+    },
+    "8": {
+      "name": "Reliktowy Zamek",
+      "requiredPA": 14,
+      "isSpecial": true
+    }
   },
   "Alola": {
-    "1": { "name": "Wzgórze Strumyków", "requiredPA": 9 , "isSpecial": false },
-    "2": { "name": "Bujna Dżungla", "requiredPA": 14 , "isSpecial": false },
-    "3": { "name": "Plaża Wielkiej Fali", "requiredPA": 10 , "isSpecial": false },
-    "4": { "name": "Wulkaniczny Park", "requiredPA": 13, "isSpecial": false  },
-    "5": { "name": "Wielki Kanion Poni", "requiredPA": 13, "isSpecial": false  },
-    "6": { "name": "Góra Lanakila", "requiredPA": 20, "isSpecial": true}
+    "1": {
+      "name": "Wzgórze Strumyków",
+      "requiredPA": 9,
+      "isSpecial": false
+    },
+    "2": {
+      "name": "Bujna Dżungla",
+      "requiredPA": 14,
+      "isSpecial": false
+    },
+    "3": {
+      "name": "Plaża Wielkiej Fali",
+      "requiredPA": 10,
+      "isSpecial": false
+    },
+    "4": {
+      "name": "Wulkaniczny Park",
+      "requiredPA": 13,
+      "isSpecial": false
+    },
+    "5": {
+      "name": "Wielki Kanion Poni",
+      "requiredPA": 13,
+      "isSpecial": false
+    },
+    "6": {
+      "name": "Góra Lanakila",
+      "requiredPA": 20,
+      "isSpecial": true
+    }
   },
   "Kalos": {
-    "1": { "name": "Francuski Labirynt", "requiredPA": 9 , "isSpecial": false },
-    "2": { "name": "Lazurowa Zatoka", "requiredPA": 9 , "isSpecial": false },
-    "3": { "name": "Mroczna Gęstwina", "requiredPA": 18 , "isSpecial": false },
-    "4": { "name": "Lustrzana Grota", "requiredPA": 14, "isSpecial": false  },
-    "5": { "name": "Oszroniona Pieczara", "requiredPA": 9, "isSpecial": false  },
-    "6": { "name": "Przyjazne Safari", "requiredPA": 14, "isSpecial": true}
+    "1": {
+      "name": "Francuski Labirynt",
+      "requiredPA": 9,
+      "isSpecial": false
+    },
+    "2": {
+      "name": "Lazurowa Zatoka",
+      "requiredPA": 9,
+      "isSpecial": false
+    },
+    "3": {
+      "name": "Mroczna Gęstwina",
+      "requiredPA": 18,
+      "isSpecial": false
+    },
+    "4": {
+      "name": "Lustrzana Grota",
+      "requiredPA": 14,
+      "isSpecial": false
+    },
+    "5": {
+      "name": "Oszroniona Pieczara",
+      "requiredPA": 9,
+      "isSpecial": false
+    },
+    "6": {
+      "name": "Przyjazne Safari",
+      "requiredPA": 14,
+      "isSpecial": true
+    }
   },
   "Paldea": {
-    "1": { "name": "Melancholijne Pola", "requiredPA": 10, "isSpecial": false },
-    "2": { "name": "Gąszcz Tagtree", "requiredPA": 10, "isSpecial": false },
-    "3": { "name": "Góra Glaseado", "requiredPA": 14, "isSpecial": false },
-    "4": { "name": "Jezioro Casseroya", "requiredPA": 15, "isSpecial": false },
-    "5": { "name": "Pustynia Asado", "requiredPA": 20, "isSpecial": false },
-    "6": { "name": "Strefa Zero", "requiredPA": 15, "isSpecial": true }
+    "1": {
+      "name": "Melancholijne Pola",
+      "requiredPA": 10,
+      "isSpecial": false
+    },
+    "2": {
+      "name": "Gąszcz Tagtree",
+      "requiredPA": 10,
+      "isSpecial": false
+    },
+    "3": {
+      "name": "Góra Glaseado",
+      "requiredPA": 14,
+      "isSpecial": false
+    },
+    "4": {
+      "name": "Jezioro Casseroya",
+      "requiredPA": 15,
+      "isSpecial": false
+    },
+    "5": {
+      "name": "Pustynia Asado",
+      "requiredPA": 20,
+      "isSpecial": false
+    },
+    "6": {
+      "name": "Strefa Zero",
+      "requiredPA": 15,
+      "isSpecial": true
+    }
+  },
+  "Galar": {
+    "1": {
+      "name": "Senna Puszcza",
+      "requiredPA": 20,
+      "isSpecial": false
+    },
+    "2": {
+      "name": "Galariańska Kopalnia",
+      "requiredPA": 20,
+      "isSpecial": false
+    },
+    "3": {
+      "name": "Koronna Tundra",
+      "requiredPA": 20,
+      "isSpecial": false
+    },
+    "4": {
+      "name": "Bór Glimwood",
+      "requiredPA": 20,
+      "isSpecial": false
+    },
+    "5": {
+      "name": "Wyspa Pancerza",
+      "requiredPA": 20,
+      "isSpecial": false
+    },
+    "6": {
+      "name": "Dzika Strefa",
+      "requiredPA": 20,
+      "isSpecial": true
+    }
   }
 }
