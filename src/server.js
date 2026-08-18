@@ -137,10 +137,12 @@ function startServer() {
     else if (action === 'stop')     { state.setEmergencyStop(true); }
     else if (action === 'hospital') { setForceHospital(true); }
     else if (action === 'updateTeam') { state.setForceTeamUpdate(true); }
+    else if (action === 'useTepel')   { state.setUseRepelRequest('tepel'); }
+    else if (action === 'useRepel')   { state.setUseRepelRequest('repel'); }
     else { return res.status(400).json({ ok: false, error: `Unknown action: ${action}` }); }
-    const { isPaused, emergencyStop, forceHospital, forceTeamUpdate } = state.getState();
+    const { isPaused, emergencyStop, forceHospital, forceTeamUpdate, useRepelRequest } = state.getState();
     log.info('Control action received', { action });
-    res.json({ ok: true, isPaused, emergencyStop, forceHospital, forceTeamUpdate });
+    res.json({ ok: true, isPaused, emergencyStop, forceHospital, forceTeamUpdate, useRepelRequest });
   });
 
   app.listen(port, () => {

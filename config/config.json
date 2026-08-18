@@ -1,5 +1,5 @@
 {
-  "region": "Kalos",
+  "region": "Unova",
   "adventureNr": 2,
   "randomAdventure": false,
   "pokemonIndex": 3,
@@ -247,7 +247,10 @@
     "Heliolisk",
     "Greninja Battle",
     "Florges",
-    "Goodra"
+    "Goodra",
+    "Vanillite",
+    "Dwebble",
+    "Panpour"
   ],
   "protectedPokemon": [
     "Flabébé"
@@ -286,7 +289,9 @@
     "Hawlucha",
     "Chespin",
     "Doublade",
-    "Furfrou"
+    "Furfrou",
+    "Golurk",
+    "Duosion"
   ],
   "diff4CatchPokemons": [
     "Zebstrika",

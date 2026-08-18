@@ -2,12 +2,14 @@ const _state = {
   pa:            { current: 0, max: 0 },
   hp:            { current: 0, max: 100 },
   storage:       { current: 0, max: 0 },
+  repel:         null,          // licznik Tepela/Repela; null = nieaktywny
   activity:      { active: false },
   isRunning:     true,
   isPaused:      false,
   emergencyStop: false,
   forceHospital: false,
   forceTeamUpdate: false,
+  useRepelRequest: null,        // 'tepel' | 'repel' — zlecenie z panelu web
   teamLastUpdated: null,
   region:        null,
   adventureNr:   null,
@@ -47,8 +49,9 @@ function setEmergencyStop(bool) { _state.emergencyStop = bool; _notifySseClients
 function setForceHospital(bool) { _state.forceHospital = bool; _notifySseClients(); }
 function setForceTeamUpdate(bool) { _state.forceTeamUpdate = bool; _notifySseClients(); }
 function setTeamLastUpdated(iso)  { _state.teamLastUpdated = iso; _notifySseClients(); }
+function setUseRepelRequest(kind) { _state.useRepelRequest = kind; _notifySseClients(); }
 
 function subscribeSse(res)   { _sseClients.add(res); }
 function unsubscribeSse(res) { _sseClients.delete(res); }
 
-module.exports = { getState, updateStats, addLog, setPaused, setEmergencyStop, setForceHospital, setForceTeamUpdate, setTeamLastUpdated, subscribeSse, unsubscribeSse };
+module.exports = { getState, updateStats, addLog, setPaused, setEmergencyStop, setForceHospital, setForceTeamUpdate, setTeamLastUpdated, setUseRepelRequest, subscribeSse, unsubscribeSse };

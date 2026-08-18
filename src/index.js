@@ -180,11 +180,11 @@ while (true){
     log.info("Wystarczająca ilość PA");
 
     const hpResult = await CheckHP(page);
-    state.updateStats({ hp: { current: hpResult.currentHP, max: hpResult.maxHP } });
+    state.updateStats({ hp: { current: hpResult.currentHP, max: hpResult.maxHP }, repel: hpResult.repel });
     if (hpResult.currentHP < HP_THRESHOLD){
       log.warn("Niskie HP, idę do Centrum Pokemon");
       const hpAfterHospital = await ClickHospital(page);
-      state.updateStats({ hp: { current: hpAfterHospital.currentHP, max: hpAfterHospital.maxHP } });
+      state.updateStats({ hp: { current: hpAfterHospital.currentHP, max: hpAfterHospital.maxHP }, repel: hpAfterHospital.repel });
     }
     
     await runCareIfNeeded(page);
@@ -239,7 +239,7 @@ while (true){
       if (state.getState().forceHospital) {
         log.info('Force hospital via API');
         const hpAfterForce = await ClickHospital(page);
-        state.updateStats({ hp: { current: hpAfterForce.currentHP, max: hpAfterForce.maxHP } });
+        state.updateStats({ hp: { current: hpAfterForce.currentHP, max: hpAfterForce.maxHP }, repel: hpAfterForce.repel });
         state.setForceHospital(false);
       }
       // Przycisk "Odczytaj z gry" — obsługujemy też tutaj, bo bot spędza
