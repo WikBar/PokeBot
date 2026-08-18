@@ -122,9 +122,9 @@ async function CatchPokemon(page, pokemon, regionInfo, regionName, battleSlot = 
     await ClickXBall(page, Pokeballe.ultraball );
   } else if (pokemon.level > 75 ) {
     // Rzut wykonujemy zawsze; wynik decyduje tylko o powiadomieniu.
-    // Przy oszczedzaniu safariballi bierzemy cherishballa - trudnosc jest
-    // tu <3, inaczej zlapalby to warunek useSafari na poczatku.
-    const thrown = useSafari
+    // W lokacji specjalnej safariball jest jedyna dostepna kula, wiec
+    // oszczedzanie (saveSafariBall) tu nie obowiazuje.
+    const thrown = regionInfo.isSpecial
       ? await ClickXBall(page, Pokeballe.safariball)
       : await ClickXBall(page, Pokeballe.cherishball);
 
