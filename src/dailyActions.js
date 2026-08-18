@@ -370,20 +370,24 @@ async function doDailyLeagueFights(page) {
     log.info('Liga: kliknięto "Rozpocznij walkę".');
     await page.waitForTimeout(2000);
 
+    fought++;
+
+    // "Powrót" pojawia się dopiero po walce i wraca na ekran ligi,
+    // gdzie widać zaktualizowany licznik — to jedyna droga powrotna.
     const backBtn = page.locator('button:has-text("Powrót"), a:has-text("Powrót")').first();
-    if (await backBtn.count() > 0) {
+    if (await backBtn.count() === 0) {
+      log.warn('Liga: brak przycisku "Powrót" po walce - wracam przez menu.');
+      await navigateViaMenu(page, 'Liga', 'Twoja Liga');
+    } else {
       await backBtn.click();
       log.info('Liga: kliknięto "Powrót".');
-      await page.waitForTimeout(2000);
-    } 
-
-    fought++;
+    }
+    try { await page.waitForLoadState('networkidle', { timeout: 5000 }); } catch { /* ignore */ }
+    await page.waitForTimeout(2000);
   }
 
-  // Wracamy na ekran ligi i sprawdzamy licznik — dopiero 0 oznacza,
-  // że dzienne walki są faktycznie wykonane.
-  await navigateViaMenu(page, 'Liga', 'Twoja Liga');
-  await page.waitForTimeout(2000);
+  // Po "Powrót" jesteśmy już na ekranie ligi — sprawdzamy licznik.
+  // Dopiero 0 oznacza, że dzienne walki są faktycznie wykonane.
   const left = await getRemainingLeagueFights(page);
 
   log.info(`Liga: wykonano ${fought} walk, pozostało ${left ?? '?'}.`);
