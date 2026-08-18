@@ -16,6 +16,29 @@ const LEAGUE_MONDAY_MIN_HOUR = 13;
 const MAX_LEAGUE_FIGHTS = 60;
 
 
+// Klucz tygodnia ligi. Tydzień zaczyna się w poniedziałek o LEAGUE_MONDAY_MIN_HOUR
+// (wtedy resetuje się licznik biletów), więc poniedziałek przed tą godziną
+// należy jeszcze do tygodnia poprzedniego.
+function getLeagueWeekKey(now = new Date()) {
+  const d = new Date(now);
+  if (d.getDay() === 1 && d.getHours() < LEAGUE_MONDAY_MIN_HOUR) {
+    d.setDate(d.getDate() - 1);          // cofamy do poprzedniego tygodnia
+  }
+  // Cofamy do poniedziałku bieżącego tygodnia (niedziela = 0 → 6 dni wstecz).
+  const dayOfWeek = (d.getDay() + 6) % 7;
+  d.setDate(d.getDate() - dayOfWeek);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `W${y}-${m}-${day}`;            // np. W2026-08-17 (poniedziałek)
+}
+
+// Weekend = sobota lub niedziela — wtedy tylko weryfikujemy, czy x=0.
+function isWeekend(now = new Date()) {
+  const day = now.getDay();
+  return day === 6 || day === 0;
+}
+
 function getDailyRunKey(now = new Date()) {
   const shiftedDate = new Date(now);
   if (
@@ -330,8 +353,23 @@ function isLeagueBlockedNow(now = new Date()) {
 
 async function doDailyLeagueFights(page) {
   if (isLeagueBlockedNow()) {
-    log.info(`Liga: poniedziałek przed ${LEAGUE_MONDAY_MIN_HOUR}:00 - pomijam, spróbuję później.`);
+    log.info(`Liga: poniedziałek przed ${LEAGUE_MONDAY_MIN_HOUR}:00 - trwa reset, pomijam.`);
     return null;   // null = nie oznaczaj jako wykonane, wróć do tego później
+  }
+
+  // Liga jest zadaniem TYGODNIOWYM. Jeśli w tym tygodniu licznik osiągnął
+  // już 0, nie ma po co wchodzić na ekran ligi — poza weekendem, kiedy
+  // robimy kontrolne sprawdzenie, czy faktycznie nic nie zostało.
+  const state = loadDailyState();
+  const weekKey = getLeagueWeekKey();
+  const alreadyDone = state.actions.leagueFights === weekKey;
+
+  if (alreadyDone && !isWeekend()) {
+    log.info(`Liga: tydzień ${weekKey} już zaliczony - pomijam.`);
+    return true;
+  }
+  if (alreadyDone) {
+    log.info(`Liga: tydzień ${weekKey} zaliczony - weekendowa kontrola licznika.`);
   }
 
   await navigateViaMenu(page, 'Liga', 'Twoja Liga');
@@ -391,8 +429,12 @@ async function doDailyLeagueFights(page) {
   const left = await getRemainingLeagueFights(page);
   log.info(`Liga: wykonano ${fought} walk, pozostało ${left ?? '?'}.`);
 
-  // Dopiero zerowy licznik oznacza, że dzienne walki są wykonane.
-  if (left === 0) return true;
+  // Zerowy licznik zamyka cały TYDZIEŃ, nie tylko dzisiejszy dzień.
+  if (left === 0) {
+    markActionDone(loadDailyState(), 'leagueFights', weekKey);
+    log.info(`Liga: tydzień ${weekKey} zaliczony.`);
+    return true;
+  }
   return null;
 }
 
@@ -580,20 +622,22 @@ async function runDailyActions(page) {
   ];
 
   for (const action of dailyActions) {
-    if (isActionDone(state, action.key, dayKey)) continue;
+    // Liga rozlicza się tygodniowo — ma własny klucz i sama go zapisuje.
+    const actionKey = action.key === 'leagueFights' ? getLeagueWeekKey() : dayKey;
+    if (isActionDone(state, action.key, actionKey)) continue;
 
     try {
       const done = await action.runner(page);
       if (done === null) continue;
 
-      markActionDone(state, action.key, dayKey);
+      markActionDone(state, action.key, actionKey);
 
-      if (done) log.info('Daily wykonana.', { action: action.key, label: action.label, dayKey });
-      else log.info('Daily niedostępna - pomijam do jutra.', { action: action.key, label: action.label, dayKey });
+      if (done) log.info('Daily wykonana.', { action: action.key, label: action.label, dayKey: actionKey });
+      else log.info('Daily niedostępna - pomijam do jutra.', { action: action.key, label: action.label, dayKey: actionKey });
 
       await page.waitForTimeout(800);
     } catch (error) {
-      markActionDone(state, action.key, dayKey);
+      markActionDone(state, action.key, actionKey);
       log.warn('Błąd w daily - pomijam do jutra.', { action: action.key, label: action.label, error: String(error), stack: error?.stack });
     }
   }
@@ -669,10 +713,14 @@ function areAllDailysDone() {
   const state = loadDailyState();
   const dayKey = getDailyRunKey();
   const keys = ['lottery', 'leagueFights', 'farm', 'pokemonCare', 'associationPA', 'paBerries'];
-  // Liga zablokowana (poniedziałek przed 13:00) nie blokuje reszty dailys.
-  return keys.every(k =>
-    isActionDone(state, k, dayKey) || (k === 'leagueFights' && isLeagueBlockedNow())
-  );
+  return keys.every(k => {
+    // Liga jest tygodniowa — sprawdzamy klucz tygodnia, a podczas
+    // poniedziałkowego resetu nie blokuje pozostałych dailys.
+    if (k === 'leagueFights') {
+      return isLeagueBlockedNow() || isActionDone(state, k, getLeagueWeekKey());
+    }
+    return isActionDone(state, k, dayKey);
+  });
 }
 
 module.exports = {
