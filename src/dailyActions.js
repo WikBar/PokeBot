@@ -337,23 +337,26 @@ async function doDailyLeagueFights(page) {
   await navigateViaMenu(page, 'Liga', 'Twoja Liga');
   await page.waitForTimeout(2000);
 
+  const tickets = await getRemainingLeagueFights(page);
+  if (tickets === null) {
+    log.info('Liga: nie znaleziono licznika walk - pomijam.');
+    return null;
+  }
+  if (tickets <= 0) {
+    log.info('Liga: brak biletów na walki - nic do zrobienia.');
+    return true;
+  }
+
+  log.info(`Liga: do stoczenia ${tickets} walk.`);
   let fought = 0;
 
-  // Powtarzamy aż licznik biletów spadnie do zera. Limit iteracji chroni
-  // przed pętlą w nieskończoność, gdyby licznik nie chciał się zmniejszyć.
-  for (let i = 0; i < MAX_LEAGUE_FIGHTS; i++) {
-    const remaining = await getRemainingLeagueFights(page);
-    if (remaining === null) {
-      log.info('Liga: nie znaleziono licznika walk - przerywam.');
-      break;
-    }
-
-    log.info(`Liga: pozostałe walki = ${remaining}.`);
-    if (remaining <= 0) break;
-
+  // "Rozpocznij następną walkę" jest dostępne także po walce, więc nie
+  // wracamy na ekran ligi między walkami. Limit iteracji na wypadek,
+  // gdyby przyciski nie znikały mimo wyczerpania biletów.
+  for (let i = 0; i < Math.min(tickets, MAX_LEAGUE_FIGHTS); i++) {
     const nextFightBtn = page.locator('button:has-text("Rozpocznij następną walkę"), a:has-text("Rozpocznij następną walkę")').first();
     if (await nextFightBtn.count() === 0) {
-      log.info('Liga: nie znaleziono przycisku "Rozpocznij następną walkę" - przerywam.');
+      log.info('Liga: brak przycisku "Rozpocznij następną walkę" - kończę walki.');
       break;
     }
     await nextFightBtn.click();
@@ -367,33 +370,29 @@ async function doDailyLeagueFights(page) {
       break;
     }
     await startFightBtn.click();
-    log.info('Liga: kliknięto "Rozpocznij walkę".');
-    await page.waitForTimeout(2000);
-
     fought++;
-
-    // "Powrót" pojawia się dopiero po walce i wraca na ekran ligi,
-    // gdzie widać zaktualizowany licznik — to jedyna droga powrotna.
-    const backBtn = page.locator('button:has-text("Powrót"), a:has-text("Powrót")').first();
-    if (await backBtn.count() === 0) {
-      log.warn('Liga: brak przycisku "Powrót" po walce - wracam przez menu.');
-      await navigateViaMenu(page, 'Liga', 'Twoja Liga');
-    } else {
-      await backBtn.click();
-      log.info('Liga: kliknięto "Powrót".');
-    }
+    log.info(`Liga: kliknięto "Rozpocznij walkę" (${fought}/${tickets}).`);
     try { await page.waitForLoadState('networkidle', { timeout: 5000 }); } catch { /* ignore */ }
     await page.waitForTimeout(2000);
   }
 
-  // Po "Powrót" jesteśmy już na ekranie ligi — sprawdzamy licznik.
-  // Dopiero 0 oznacza, że dzienne walki są faktycznie wykonane.
+  // "Powrót" (dostępny po walce) wraca na ekran ligi — tam sprawdzamy licznik.
+  const backBtn = page.locator('button:has-text("Powrót"), a:has-text("Powrót")').first();
+  if (await backBtn.count() > 0) {
+    await backBtn.click();
+    log.info('Liga: kliknięto "Powrót" - sprawdzam licznik.');
+  } else {
+    log.warn('Liga: brak przycisku "Powrót" - wracam przez menu.');
+    await navigateViaMenu(page, 'Liga', 'Twoja Liga');
+  }
+  try { await page.waitForLoadState('networkidle', { timeout: 5000 }); } catch { /* ignore */ }
+  await page.waitForTimeout(2000);
+
   const left = await getRemainingLeagueFights(page);
-
   log.info(`Liga: wykonano ${fought} walk, pozostało ${left ?? '?'}.`);
-  if (left === 0) return true;
 
-  // Zostały bilety (np. brak przycisku, błąd strony) — spróbujemy ponownie.
+  // Dopiero zerowy licznik oznacza, że dzienne walki są wykonane.
+  if (left === 0) return true;
   return null;
 }
 
