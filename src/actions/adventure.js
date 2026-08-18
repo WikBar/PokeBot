@@ -92,16 +92,22 @@ async function ClickPokemon(page, PokemonIndex) {
   }
 }
 
-async function CatchPokemon(page, pokemon, regionInfo, regionName, battleSlot = null) {
+async function CatchPokemon(page, pokemon, regionInfo, regionName, battleSlot = null, options = {}) {
   log.info(`Łapię: ${pokemon?.pokemon} Poziom: ${pokemon?.level} o ${new Date().toLocaleTimeString()}`);
   const NestBallMaxLvl = 20;
   const LvlBallMinLvl = 40;
   const LureBallMaxLvl = 30;
   const time = new Date().getHours();
 
+  // Oszczedzanie safariballi (panel web). Wlaczone = rzucamy tylko przy
+  // catchDiff >= 3; wylaczone = w lokacji specjalnej rzucamy bez wzgledu
+  // na trudnosc. Brak ustawienia traktujemy jak wlaczone.
+  const saveSafariBall = options.saveSafariBall !== false;
+  const useSafari = regionInfo.isSpecial && (!saveSafariBall || pokemon.catchDiff >= 3);
+
   // Poziom >75 = Golden Nest. Sprawdzamy jako pierwsze, żeby alert wyszedł
   // także w lokacjach specjalnych (inaczej przechwyciłby je warunek safariball).
-   if (pokemon.catchDiff >= 3 && regionInfo.isSpecial) {
+   if (useSafari) {
     await ClickXBall(page, Pokeballe.safariball);
   } else if (pokemon.level < LureBallMaxLvl && pokemon.catchDiff <= 2 && sharesType(pokemon.types, battleSlot)) {
       // Lureball ma pierwszenstwo przed pokeballem i friendballem: ponizej 30
@@ -114,11 +120,11 @@ async function CatchPokemon(page, pokemon, regionInfo, regionName, battleSlot = 
     await ClickXBall(page, Pokeballe.friendball);
   } else if (pokemon.catchDiff >= 4 && pokemon.level < 70) {
     await ClickXBall(page, Pokeballe.ultraball );
-  } else if (pokemon.catchDiff >= 3 && regionInfo.isSpecial) {
-    await ClickXBall(page, Pokeballe.safariball);
   } else if (pokemon.level > 75 ) {
     // Rzut wykonujemy zawsze; wynik decyduje tylko o powiadomieniu.
-    const thrown = regionInfo.isSpecial
+    // Przy oszczedzaniu safariballi bierzemy cherishballa - trudnosc jest
+    // tu <3, inaczej zlapalby to warunek useSafari na poczatku.
+    const thrown = useSafari
       ? await ClickXBall(page, Pokeballe.safariball)
       : await ClickXBall(page, Pokeballe.cherishball);
 

@@ -14,6 +14,7 @@
   "autoRepelKind": "repel",
   "autoRepelTier": 1,
   "autoRepelMin": 2,
+  "saveSafariBall": true,
   "sellablePokemon": [
     "Zubat",
     "Magikarp",

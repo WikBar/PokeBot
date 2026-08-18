@@ -278,7 +278,8 @@ while (true){
         const battleSlot = team[battleIndex] || null;
 
         if (await CheckIfGoodEvent(page)==3){
-          await CatchPokemon(page,pokemonInfo,locationInfo,accountConfig.region,battleSlot);
+          await CatchPokemon(page,pokemonInfo,locationInfo,accountConfig.region,battleSlot,
+            { saveSafariBall: accountConfig.saveSafariBall });
           state.updateStats({ lastEvent: 'pokemon_caught' });
           }
 
