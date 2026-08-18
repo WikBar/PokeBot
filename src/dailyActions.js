@@ -334,11 +334,24 @@ async function doDailyPokemonCare(page, state) {
   await waitForCareTimer(page);
 
   // Po opiece odświeżamy stan plecaka (po timerze, żeby nie opuszczać
-  // strony aktywności w trakcie oczekiwania).
+  // strony aktywności w trakcie oczekiwania). Ustawienia auto-Tepela
+  // przekazujemy, by alarmowac tylko o faktycznie uzywanym przedmiocie.
   const { OpenBackpackAndUpdate } = require('./actions/equipment');
-  await OpenBackpackAndUpdate(page, navigateViaMenu);
+  await OpenBackpackAndUpdate(page, navigateViaMenu, readRepelOptions());
 
   return true;
+}
+
+// Ustawienia auto-Tepela/Repela z config.json. Czytamy z dysku, bo panel
+// web moze je zmienic w trakcie dzialania bota.
+function readRepelOptions() {
+  try {
+    const cfgPath = path.resolve(__dirname, '..', 'config', 'config.json');
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+    return { autoRepelKind: cfg.autoRepelKind, autoRepelTier: cfg.autoRepelTier };
+  } catch {
+    return {};
+  }
 }
 
 async function getRemainingLeagueFights(page) {

@@ -80,6 +80,20 @@ function flattenItems(items) {
   return flat;
 }
 
+// Czy nazwa to ktorykolwiek Tepel/Repel?
+function isRepelItem(name) {
+  const n = normalizeItemName(name);
+  return Object.values(REPEL_ITEM_NAMES).some(label => normalizeItemName(label) === n);
+}
+
+// Nazwa aktualnie uzywanego Tepela/Repela wg ustawien auto-aktywacji,
+// np. { autoRepelKind: 'repel', autoRepelTier: 3 } -> "MAX Repel".
+function activeRepelName(options = {}) {
+  const kind = options.autoRepelKind === 'tepel' ? 'tepel' : 'repel';
+  const tier = Number(options.autoRepelTier) || 1;
+  return REPEL_ITEM_NAMES[`${kind}-${tier}`] || null;
+}
+
 // Stan Tepeli/Repeli na podstawie zawartości plecaka:
 // { 'repel-1': 12, 'tepel-3': 0, ... }. Brak wpisu = 0 sztuk.
 function repelStock(items) {
@@ -159,7 +173,9 @@ async function readBackpackItems(page) {
 
 // Odczytuje plecak, zapisuje stan do equipment.json i wysyła powiadomienie
 // o przedmiotach poniżej progu. Zwraca { items, low } albo null.
-async function UpdateEquipment(page) {
+// options: { autoRepelKind, autoRepelTier } - decyduje, o ktorym
+// Tepelu/Repelu w ogole alarmowac (o pozostalych nie zawiadamiamy).
+async function UpdateEquipment(page, options = {}) {
   const items = await readBackpackItems(page);
   if (!items) {
     log.info('Plecak: nie udało się odczytać zawartości - pomijam.');
@@ -184,10 +200,19 @@ async function UpdateEquipment(page) {
 
   // Powiadamiamy tylko przy spadku poniżej progu — bez tego alert
   // powtarzałby się przy każdym wejściu do plecaka.
+  // Alerty o Tepelach/Repelach tylko dla tego, ktorego faktycznie uzywamy -
+  // reszta lezy w plecaku nieuzywana i nie ma sensu o niej przypominac.
+  const usedRepel = activeRepelName(options);
+
   const low = [];
   for (const [name, value] of Object.entries(flat)) {
     const limit = thresholdFor(thresholds, name);
     if (value > limit) continue;
+
+    if (isRepelItem(name) && normalizeItemName(name) !== normalizeItemName(usedRepel)) {
+      log.debug(`Plecak: ${name} ponizej progu, ale nie jest uzywany - bez alertu.`);
+      continue;
+    }
 
     const before = flatPrevious?.[name];
     const wasAbove = before === undefined || before > limit;
@@ -292,7 +317,8 @@ async function UseRepel(page, kind, tier, navigate) {
 
     log.info(`Tepel/Repel: aktywowano ${name}.`);
     // Po użyciu stan plecaka się zmienił — odczytujemy go ponownie.
-    await UpdateEquipment(page);
+    // Alerty dotycza wlasnie tego przedmiotu, ktory wlasnie uzylismy.
+    await UpdateEquipment(page, { autoRepelKind: kind, autoRepelTier: tier });
     return true;
   } catch (e) {
     log.warn('Tepel/Repel: błąd podczas aktywacji', { error: String(e) });
@@ -322,13 +348,13 @@ async function PublishSavedEquipment() {
 
 // Wchodzi do plecaka (Postać → Plecak) i aktualizuje stan.
 // Używać wszędzie tam, gdzie bot i tak otwiera plecak.
-async function OpenBackpackAndUpdate(page, navigate) {
+async function OpenBackpackAndUpdate(page, navigate, options = {}) {
   try {
     if (typeof navigate === 'function') {
       await navigate(page, 'Postać', 'Plecak');
       await page.waitForTimeout(1500);
     }
-    return await UpdateEquipment(page);
+    return await UpdateEquipment(page, options);
   } catch (e) {
     log.warn('Plecak: błąd podczas odczytu', { error: String(e) });
     return null;
@@ -354,6 +380,8 @@ module.exports = {
   thresholdFor,
   repelStock,
   flattenItems,
+  isRepelItem,
+  activeRepelName,
   parseItemLabel,
   readVisibleItems,
   EQUIPMENT_PATH,

@@ -354,8 +354,12 @@ while (true){
     if (activityCheck === false && paCheck.currentPA < locationInfo.requiredPA){
       await StartActivity(page);
       state.updateStats({ activity: { active: true } });
-      // Po wysłaniu na trening odświeżamy stan plecaka.
-      await OpenBackpackAndUpdate(page, navigateViaMenu);
+      // Po wysłaniu na trening odświeżamy stan plecaka. Ustawienia auto-Tepela
+      // decyduja, o ktorym Tepelu/Repelu w ogole alarmowac.
+      await OpenBackpackAndUpdate(page, navigateViaMenu, {
+        autoRepelKind: accountConfig.autoRepelKind,
+        autoRepelTier: accountConfig.autoRepelTier,
+      });
     }
     await page.reload();
     log.info("Czekam na odnowienie punktów akcji");
