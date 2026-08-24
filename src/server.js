@@ -19,7 +19,7 @@ const ALLOWED_CONFIG_KEYS = new Set([
   'pokemonIndex', 'SecondPokemonIndex', 'paBuffer', 'sellablePokemon', 'protectedPokemon',
   'sellThreshold', 'limitsEnabled', 'diff3Keep', 'diff4Keep',
   'autoRepelEnabled', 'autoRepelKind', 'autoRepelTier', 'autoRepelMin',
-  'saveSafariBall',
+  'saveSafariBall', 'activityMode',
   'diff3CatchPokemons', 'diff4CatchPokemons', 'diff5CatchPokemons', 'diff0CatchPokemons'
 ]);
 

@@ -1,6 +1,6 @@
 {
   "region": "Alola",
-  "adventureNr": 2,
+  "adventureNr": 6,
   "randomAdventure": false,
   "pokemonIndex": 3,
   "SecondPokemonIndex": 2,
@@ -15,6 +15,7 @@
   "autoRepelTier": 1,
   "autoRepelMin": 2,
   "saveSafariBall": true,
+  "activityMode": "trening",
   "sellablePokemon": [
     "Zubat",
     "Magikarp",
@@ -255,7 +256,16 @@
     "Goodra",
     "Vanillite",
     "Dwebble",
-    "Panpour"
+    "Panpour",
+    "Amaura",
+    "Noibat",
+    "Rattata Alola",
+    "Crabrawler",
+    "Minior",
+    "Vulpix Alola",
+    "Stufful",
+    "Sandshrew Alola",
+    "Diglett Alola"
   ],
   "protectedPokemon": [
     "Flabébé"
@@ -296,7 +306,8 @@
     "Doublade",
     "Furfrou",
     "Golurk",
-    "Duosion"
+    "Duosion",
+    "Raticate Alola"
   ],
   "diff4CatchPokemons": [
     "Zebstrika",
@@ -325,7 +336,10 @@
     "Quilladin",
     "Pyroar",
     "Klefki",
-    "Gogoat"
+    "Gogoat",
+    "Bewear",
+    "Dugtrio Alola",
+    "Drampa"
   ],
   "diff5CatchPokemons": [
     "Bouffalant",

@@ -59,16 +59,33 @@ async function verifyActivityStarted(page) {
   return false;
 }
 
-async function StartActivity(page) {
+// Wysyla na aktywnosc: domyslnie Trening, a przy mode === 'praca'
+// do pracy. "Praca" jest pierwsza (domyslnie otwarta) zakladka, wiec
+// wystarczy kliknac "Pracuj" - bez przelaczania zakladki.
+// Prace przerywa sie przyciskiem "Zakoncz", czyli tak samo jak trening
+// (obsluguje to CancelActivity).
+async function StartActivity(page, mode = 'trening') {
   await page.click('a.dropdown-toggle');
   await page.click('ul.dropdown-menu >> text=Aktywność');
   log.info("Kliknięto zakładkę aktywności");
   await page.waitForTimeout(1000);
+
+  if (mode === 'praca') {
+    // Pierwsza praca na liscie ("Asystent w PokeSklepie"); kolejne bywaja
+    // zablokowane osiagnieciami, wiec bierzemy pierwszy aktywny przycisk.
+    const workBtn = page.locator('button:has-text("Pracuj")').first();
+    await workBtn.waitFor({ state: 'visible', timeout: 5000 });
+    await workBtn.click();
+    log.info("Rozpoczęto pracę");
+    return 'praca';
+  }
+
   await page.hover('button:has-text("Pracuj")');
   await page.click('a[href="#aktywnosc-trening"]');
   await page.click('button:has-text("Trenuj")');
   await page.click('button:has-text("Wybierz")');
   log.info("Rozpoczęto aktywność (2h)");
+  return 'trening';
 }
 
 module.exports = {

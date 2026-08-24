@@ -593,16 +593,6 @@ async function runDailyActions(page) {
     markActionDone(state, 'farm', dayKey);
   }
 
-  if (homeStats.drinks != null && homeStats.drinks >= 1) {
-    log.info(`Stowarzyszenie: napoje energetyczne ${homeStats.drinks}/${homeStats.drinksMax} - zaznaczam jako done.`);
-    markActionDone(state, 'associationPA', dayKey);
-  }
-
-  if (homeStats.rawstCurrent != null && homeStats.rawstCurrent >= homeStats.rawstMax) {
-    log.info(`Jagody Rawst: ${homeStats.rawstCurrent}/${homeStats.rawstMax} - pełne, zaznaczam jako done.`);
-    markActionDone(state, 'paBerries', dayKey);
-  }
-
   const dailyActions = [
     { key: 'lottery',      label: 'Loteria',              runner: doDailyLottery },
     { key: 'leagueFights', label: 'Walki Ligowe',         runner: doDailyLeagueFights },
@@ -616,6 +606,12 @@ async function runDailyActions(page) {
     {
       key: 'associationPA', label: 'PA ze Stowarzyszenia',
       runner: async (page) => {
+        // Napoje to stan plecaka, nie licznik dzienny - przechodzi przez północ,
+        // więc pomijamy bez zapisu klucza, żeby reset dzienny nie był zjadany.
+        if (homeStats.drinks != null && homeStats.drinks >= 1) {
+          log.info(`Stowarzyszenie: napoje energetyczne ${homeStats.drinks}/${homeStats.drinksMax} - pomijam, spróbuję przy następnej iteracji.`);
+          return null;
+        }
         const paResult = await CheckPA(page);
         botState.updateStats({ pa: { current: paResult.currentPA, max: paResult.maxPA } });
         if (paResult.currentPA >= 100) {
@@ -628,6 +624,11 @@ async function runDailyActions(page) {
     {
       key: 'paBerries', label: 'Jagody Rawst',
       runner: async (page) => {
+        // Jak wyżej: pełne jagody to stan zasobu, nie wykonana daily.
+        if (homeStats.rawstCurrent != null && homeStats.rawstCurrent >= homeStats.rawstMax) {
+          log.info(`Jagody Rawst: ${homeStats.rawstCurrent}/${homeStats.rawstMax} - pełne, pomijam, spróbuję przy następnej iteracji.`);
+          return null;
+        }
         const paResult = await CheckPA(page);
         botState.updateStats({ pa: { current: paResult.currentPA, max: paResult.maxPA } });
         if (paResult.currentPA >= 50) {
@@ -743,6 +744,7 @@ function areAllDailysDone() {
 
 module.exports = {
   runDailyActions,
+  getDailyRunKey,
   runCareIfNeeded,
   runAssociationPAIfNeeded,
   runPABerriesIfNeeded,

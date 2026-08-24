@@ -9,7 +9,7 @@ const { loadTeam, findMatchingTeamIndex } = require('./actions/team');
 const { loadFromFile, saveToFile } = require('./utils/fileOperations');
 const { CheckIfGoodEvent,CheckIfBadEvent, CheckActivity}=require('./events');
 const path = require('path');
-const { runDailyActions, runCareIfNeeded, runAssociationPAIfNeeded, runPABerriesIfNeeded, areAllDailysDone, navigateViaMenu } = require('./dailyActions');
+const { runDailyActions, runCareIfNeeded, runAssociationPAIfNeeded, runPABerriesIfNeeded, areAllDailysDone, getDailyRunKey, navigateViaMenu } = require('./dailyActions');
 const { OpenBackpackAndUpdate, PublishSavedEquipment, UseRepel } = require('./actions/equipment');
 const { logger } = require('./utils/logger');
 const { startServer } = require('./server');
@@ -353,7 +353,9 @@ while (true){
     const paCheck = await CheckPA(page);
     state.updateStats({ pa: { current: paCheck.currentPA, max: paCheck.maxPA } });
     if (activityCheck === false && paCheck.currentPA < locationInfo.requiredPA){
-      await StartActivity(page);
+      // activityMode z panelu web: 'trening' (domyslnie) albo 'praca'.
+      const mode = accountConfig.activityMode === 'praca' ? 'praca' : 'trening';
+      await StartActivity(page, mode);
       state.updateStats({ activity: { active: true } });
       // Po wysłaniu na trening odświeżamy stan plecaka. Ustawienia auto-Tepela
       // decyduja, o ktorym Tepelu/Repelu w ogole alarmowac.
@@ -372,6 +374,7 @@ while (true){
     diff4Keep: accountConfig.diff4Keep,
   });
     let lastDailyCheckHour = -1;
+    let lastDailyCheckKey = null;
     for (let i = 0; i < REGEN_ITERATIONS; i++){
         await page.waitForTimeout(REGEN_WAIT_MINUTES * 60 * 1000);
         await page.reload();
@@ -386,11 +389,18 @@ while (true){
           state.setForceTeamUpdate(false);
           state.setTeamLastUpdated(new Date().toISOString());
         }
+        // Sprawdzamy raz na godzinę, ale też natychmiast po przekroczeniu
+        // godziny resetu dziennego - inaczej pierwsza szansa na nowe dailys
+        // wypadałaby dopiero przy najbliższej pełnej godzinie.
         const currentHour = new Date().getHours();
-        if (currentHour !== lastDailyCheckHour) {
+        const currentDayKey = getDailyRunKey();
+        const dayRolled = lastDailyCheckKey !== null && currentDayKey !== lastDailyCheckKey;
+        if (currentHour !== lastDailyCheckHour || dayRolled) {
           lastDailyCheckHour = currentHour;
+          lastDailyCheckKey = currentDayKey;
           if (!areAllDailysDone()) {
-            log.info('Sprawdzenie co godzinę: nie wszystkie daily wykonane - uruchamiam runDailyActions.');
+            const reason = dayRolled ? 'reset dzienny' : 'sprawdzenie co godzinę';
+            log.info(`${reason}: nie wszystkie daily wykonane - uruchamiam runDailyActions.`);
             await runDailyActions(page);
           } else {
             log.info('Sprawdzenie co godzinę: wszystkie daily wykonane.');

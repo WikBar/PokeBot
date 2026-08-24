@@ -5,7 +5,7 @@ const log = logger.child({ module: 'events' });
 async function CheckIfGoodEvent(page){
     
 try{
-    const Element = await page.waitForSelector('div.alert.alert-success.text-center', { timeout: 1500 });
+    const Element = await page.waitForSelector('div.alert.alert-success.text-center', { timeout: 1200 });
     const alertText = await page.evaluate(element => element.textContent, Element);
     if (alertText.includes("krzak Jagód")){
         log.info("Znalazłeś krzak Jagód");
@@ -32,7 +32,7 @@ try{
 
 async function CheckIfBadEvent(page){
     try{
-    const Element = await page.waitForSelector('div.alert.alert-danger.text-center', { timeout: 1500 });
+    const Element = await page.waitForSelector('div.alert.alert-danger.text-center', { timeout: 1200 });
     const alertText = await page.evaluate(element => element.textContent, Element);
     
     if (alertText.includes("Przegrana z")){
@@ -64,6 +64,11 @@ async function CheckActivity(page){
         if (alertText.includes("Jesteś w trakcie Opieki")){
             log.info("Jesteś w trakcie Opieki");
             return 'care';
+        } else if (alertText.includes("Jesteś w trakcie Pracy")){
+            // Praca to zwykla aktywnosc - konczy sie tym samym "Zakoncz",
+            // co trening. Rozrozniamy ja tylko w logach.
+            log.info("Jesteś w trakcie Pracy");
+            return true;
         } else if (alertText.includes("Jesteś w trakcie")){
             log.info("Jesteś w trakcie aktywności");
             return true;
