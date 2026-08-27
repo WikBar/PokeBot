@@ -58,7 +58,10 @@ function loadDailyState() {
     if (!fs.existsSync(DAILY_STATE_PATH)) return { actions: {} };
     const raw = fs.readFileSync(DAILY_STATE_PATH, 'utf8');
     const parsed = JSON.parse(raw);
-    return { actions: parsed.actions || {} };
+    // Zachowujemy CALY obiekt - wczesniej zwracalismy samo { actions },
+    // przez co kazdy zapis kasowal lastCareTime (blokada opieki nigdy
+    // nie dzialala miedzy iteracjami).
+    return { ...parsed, actions: parsed.actions || {} };
   } catch (error) {
     log.warn('Nie udało się odczytać daily-state.json, tworzę nowy.', { error: String(error) });
     return { actions: {} };
@@ -67,6 +70,22 @@ function loadDailyState() {
 
 function saveDailyState(state) {
   fs.writeFileSync(DAILY_STATE_PATH, JSON.stringify(state, null, 2), 'utf8');
+}
+
+// Ile razy probowac akcji, ktorej nie udalo sie potwierdzic w statystykach,
+// zanim odpuscimy ja do jutra. Bez limitu trwale zepsuty selektor bylby
+// probowany co iteracje petli.
+const MAX_DAILY_ATTEMPTS = 3;
+
+// Licznik prob per akcja i dzien: { "farm": { day: "2026-08-27", n: 2 } }.
+// Trzymany w daily-state.json, wiec przezywa restart bota.
+function bumpAttempt(state, key, dayKey) {
+  if (!state.attempts) state.attempts = {};
+  const cur = state.attempts[key];
+  const n = (cur && cur.day === dayKey ? cur.n : 0) + 1;
+  state.attempts[key] = { day: dayKey, n };
+  saveDailyState(state);
+  return n;
 }
 
 function isActionDone(state, key, dayKey) {
@@ -543,6 +562,36 @@ async function readHomeStats(page) {
   return result;
 }
 
+// Weryfikacja po fakcie: czy akcja jest NAPRAWDE zrobiona wg strony
+// statystyk. Zwraca true/false, albo null gdy statystyki nie odpowiadaja
+// na pytanie o dana akcje (wtedy ufamy wynikowi runnera).
+// To jedyne zrodlo prawdy - runner moze zwrocic false przez timeout albo
+// zmieniony selektor, a zadanie i tak zostalo wykonane (lub odwrotnie).
+function verifyActionDone(key, stats) {
+  if (!stats) return null;
+  switch (key) {
+    case 'lottery':
+      return stats.lotteryToday === 'tak' ? true
+           : stats.lotteryToday === 'nie' ? false : null;
+    case 'pokemonCare':
+      return stats.careToday === 'tak' ? true
+           : stats.careToday === 'nie' ? false : null;
+    case 'farm':
+      // Zrobione = nic nie dojrzalo i wszystko podlane.
+      if (stats.ripe == null || stats.total == null || stats.watered == null) return null;
+      return stats.ripe === 0 && stats.watered === stats.total;
+    case 'associationPA':
+      // Napoj z fontanny laduje w liczniku napojow.
+      return stats.drinks == null ? null : stats.drinks >= 1;
+    case 'paBerries':
+      // Zjedzenie jagod zbija licznik ponizej maksimum.
+      if (stats.rawstCurrent == null || stats.rawstMax == null) return null;
+      return stats.rawstCurrent < stats.rawstMax;
+    default:
+      return null;   // liga ma wlasna weryfikacje licznikiem walk
+  }
+}
+
 async function runDailyActions(page) {
   const dayKey = getDailyRunKey();
   const state = loadDailyState();
@@ -645,21 +694,59 @@ async function runDailyActions(page) {
     const actionKey = action.key === 'leagueFights' ? getLeagueWeekKey() : dayKey;
     if (isActionDone(state, action.key, actionKey)) continue;
 
+    let done;
     try {
-      const done = await action.runner(page);
-      if (done === null) continue;
-
-      markActionDone(state, action.key, actionKey);
-
-      if (done) log.info('Daily wykonana.', { action: action.key, label: action.label, dayKey: actionKey });
-      else log.info('Daily niedostępna - pomijam do jutra.', { action: action.key, label: action.label, dayKey: actionKey });
-
-      await page.waitForTimeout(800);
+      done = await action.runner(page);
+      if (done === null) continue;   // celowe pominiecie (np. warunek PA)
     } catch (error) {
-      markActionDone(state, action.key, actionKey);
-      log.warn('Błąd w daily - pomijam do jutra.', { action: action.key, label: action.label, error: String(error), stack: error?.stack });
+      done = false;
+      log.warn('Błąd w daily.', { action: action.key, label: action.label, error: String(error), stack: error?.stack });
     }
+
+    // Zamiast wierzyc runnerowi, pytamy strone statystyk. Runner potrafi
+    // zwrocic false przez timeout albo zmieniony selektor, choc zadanie
+    // zostalo wykonane - i odwrotnie.
+    const confirmed = await confirmActionDone(page, action.key, done);
+
+    if (confirmed === true) {
+      markActionDone(state, action.key, actionKey);
+      log.info('Daily wykonana (potwierdzona w statystykach).', { action: action.key, label: action.label, dayKey: actionKey });
+      await page.waitForTimeout(800);
+      continue;
+    }
+
+    // Niepotwierdzona: nie zapisujemy, ale liczymy probe, zeby trwale
+    // zepsuta akcja nie byla powtarzana w nieskonczonosc.
+    const attempts = bumpAttempt(state, action.key, dayKey);
+    if (attempts >= MAX_DAILY_ATTEMPTS) {
+      markActionDone(state, action.key, actionKey);
+      log.warn(`Daily nieudana ${attempts}x - odpuszczam do jutra.`, { action: action.key, label: action.label });
+    } else {
+      log.info(`Daily niepotwierdzona (próba ${attempts}/${MAX_DAILY_ATTEMPTS}) - spróbuję ponownie.`, { action: action.key, label: action.label });
+    }
+    await page.waitForTimeout(800);
   }
+}
+
+// Sprawdza w statystykach, czy akcja faktycznie sie wykonala.
+// Gdy statystyki nie odpowiadaja na to pytanie, przyjmujemy wynik runnera.
+async function confirmActionDone(page, key, runnerResult) {
+  // Liga sama weryfikuje sie licznikiem walk - nie ma jej w statystykach.
+  if (key === 'leagueFights') return runnerResult === true;
+
+  try {
+    const fresh = await readHomeStats(page);
+    const verified = verifyActionDone(key, fresh);
+    if (verified !== null) {
+      if (verified !== (runnerResult === true)) {
+        log.info(`Statystyki korygują wynik: ${key} runner=${runnerResult} → ${verified}.`);
+      }
+      return verified;
+    }
+  } catch (e) {
+    log.debug('Nie udało się zweryfikować daily w statystykach.', { action: key, error: String(e) });
+  }
+  return runnerResult === true;
 }
 
 async function runCareIfNeeded(page) {
@@ -705,7 +792,10 @@ async function runAssociationPAIfNeeded(page) {
   if (paResult.currentPA >= 100) return;
   try {
     const done = await doDailyAssociationPA(page);
-    if (done) markActionDone(state, 'associationPA', dayKey);
+    // Zapisujemy tylko to, co potwierdzaja statystyki (licznik napojow).
+    if (await confirmActionDone(page, 'associationPA', done)) {
+      markActionDone(state, 'associationPA', dayKey);
+    }
   } catch (e) {
     log.warn('AssociationPA w pętli: błąd', { error: String(e) });
   }
@@ -722,7 +812,10 @@ async function runPABerriesIfNeeded(page) {
   if (paResult.currentPA >= 50) return;
   try {
     const done = await doDailyPABerries(page);
-    if (done) markActionDone(state, 'paBerries', dayKey);
+    // Zapisujemy tylko to, co potwierdzaja statystyki (licznik jagod).
+    if (await confirmActionDone(page, 'paBerries', done)) {
+      markActionDone(state, 'paBerries', dayKey);
+    }
   } catch (e) {
     log.warn('PABerries w pętli: błąd', { error: String(e) });
   }
