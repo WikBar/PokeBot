@@ -20,6 +20,7 @@ const ALLOWED_CONFIG_KEYS = new Set([
   'sellThreshold', 'limitsEnabled', 'diff3Keep', 'diff4Keep',
   'autoRepelEnabled', 'autoRepelKind', 'autoRepelTier', 'autoRepelMin',
   'saveSafariBall', 'activityMode', 'adventureDelay',
+  'shinyHunt', 'shinyHuntTries', 'skippedAdventures',
   'diff3CatchPokemons', 'diff4CatchPokemons', 'diff5CatchPokemons', 'diff0CatchPokemons'
 ]);
 
@@ -67,6 +68,33 @@ function startServer() {
   app.get('/api/regions', async (_req, res) => {
     const locations = await loadFromFile(LOCATIONS_PATH);
     res.json({ regions: locations ? Object.keys(locations) : [] });
+  });
+
+  // Lokacje danego regionu — panel potrzebuje ich, żeby wiedzieć, które
+  // numery wypraw w ogóle istnieją (reszta przełączników jest nieaktywna).
+  app.get('/api/locations', async (req, res) => {
+    const locations = await loadFromFile(LOCATIONS_PATH);
+    if (!locations) return res.json({ locations: [] });
+
+    const region = req.query.region;
+    if (region && locations[region]) {
+      const list = Object.entries(locations[region])
+        .map(([nr, loc]) => ({
+          nr: Number(nr),
+          name: loc.name,
+          isSpecial: !!loc.isSpecial,
+          requiredPA: loc.requiredPA,
+        }))
+        .sort((a, b) => a.nr - b.nr);
+      return res.json({ region, locations: list });
+    }
+
+    // Bez parametru: mapa region → numery lokacji.
+    const all = {};
+    for (const [name, locs] of Object.entries(locations)) {
+      all[name] = Object.keys(locs).map(Number).sort((a, b) => a - b);
+    }
+    res.json({ locations: all });
   });
 
   app.get('/api/daily', async (req, res) => {

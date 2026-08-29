@@ -370,5 +370,8 @@
     "Oranguru",
     "Passimian"
   ],
-  "diff0CatchPokemons": []
+  "diff0CatchPokemons": [],
+  "shinyHunt": false,
+  "shinyHuntTries": 20,
+  "skippedAdventures": []
 }

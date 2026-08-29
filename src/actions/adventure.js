@@ -1,7 +1,7 @@
 const { Pokeballe } = require('./constants');
 const { ClickContinue } = require('./activity');
 const { logger } = require('../utils/logger');
-const { notifyGoldenNest } = require('../utils/notifier');
+const { notifyGoldenNest, notifyGoldenNestResult } = require('../utils/notifier');
 const { sharesType } = require('./team');
 
 const log = logger.child({ module: 'adventure' });
@@ -84,6 +84,32 @@ async function CheckUltraBeast(page) {
   }
 }
 
+// Sprawdza sam sygnal z przyciskow akcji: zwykla wyprawa ma lewy przycisk
+// disabled z kreska "—" i prawy "Kontynuuj"; przy Golden Nescie oba maja
+// napis "Kontynuuj". To warunek KONIECZNY, ale nie wystarczajacy - drugi
+// przycisk bywa aktywny takze przy Ultra Bestii i bez pokemona, dlatego
+// wywolujacy musi dodatkowo sprawdzic poziom pokemona (>75).
+async function IsGoldenNest(page) {
+  try {
+    const buttons = await page.$$('button.btn-akcja');
+    if (buttons.length < 2) return false;
+
+    let continueCount = 0;
+    for (const btn of buttons) {
+      const text = String(await btn.innerText().catch(() => '')).trim();
+      if (text.toLowerCase().includes('kontynuuj')) continueCount++;
+    }
+
+    // Dwa "Kontynuuj" zamiast jednego = Golden Nest.
+    const isGolden = continueCount >= 2;
+    if (isGolden) log.info('Golden Nest wykryty (dwa przyciski "Kontynuuj").');
+    return isGolden;
+  } catch (e) {
+    log.debug('Nie udało się sprawdzić Golden Nest', { error: String(e) });
+    return false;
+  }
+}
+
 async function CheckIfPokemon(page) {
   const element = await page.$('div.panel.panel-primary.nopadding.nomargin');
   const pokemonInfo = {};
@@ -116,7 +142,13 @@ async function ClickPokemon(page, PokemonIndex) {
 async function CatchPokemon(page, pokemon, regionInfo, regionName, battleSlot = null, options = {}) {
   log.info(`Łapię: ${pokemon?.pokemon} Poziom: ${pokemon?.level} o ${new Date().toLocaleTimeString()}`);
   const NestBallMaxLvl = 20;
-  const LvlBallMinLvl = 40;
+  // Levelball od 30 poziomu wzwyz. Ponizej tego progu zostaja nightball
+  // (wieczorem/noca) i greatball.
+  const LvlBallMinLvl = 30;
+  const NightBallMaxLvl = 30;
+  // Do tego poziomu trudne pokemony (catchDiff >= 4) lapiemy ultraballem,
+  // powyzej - levelballem.
+  const UltraBallMaxLvl = 70;
   const LureBallMaxLvl = 30;
   const time = new Date().getHours();
 
@@ -132,12 +164,14 @@ async function CatchPokemon(page, pokemon, regionInfo, regionName, battleSlot = 
   if (options.ultraBeast) {
     const thrown = await ClickXBall(page, Pokeballe.beastball);
     if (!thrown) log.warn('Ultra Bestia: nie znaleziono beastballa na ekranie łapania.');
-    return;
+    return { goldenNest: false };
   }
 
-  // Poziom >75 = Golden Nest. Sprawdzamy jako pierwsze, żeby alert wyszedł
-  // także w lokacjach specjalnych (inaczej przechwyciłby je warunek safariball).
-   if (useSafari) {
+  // Golden Nest sygnalizuje wywolujacy (przyciski + poziom >75). Sprawdzamy
+  // go jako pierwszy, zeby alert wyszedl takze w lokacjach specjalnych
+  // (inaczej przechwycilby je warunek safariball).
+  const goldenNest = options.goldenNest === true;
+   if (useSafari && !goldenNest) {
     await ClickXBall(page, Pokeballe.safariball);
   } else if (pokemon.level < LureBallMaxLvl && pokemon.catchDiff <= 2 && sharesType(pokemon.types, battleSlot)) {
       // Lureball ma pierwszenstwo przed pokeballem i friendballem: ponizej 30
@@ -148,9 +182,7 @@ async function CatchPokemon(page, pokemon, regionInfo, regionName, battleSlot = 
       await ClickXBall(page, Pokeballe.pokeball);
   } else if (pokemon.catchDiff === 2 && pokemon.level < 30) {
     await ClickXBall(page, Pokeballe.friendball);
-  } else if (pokemon.catchDiff >= 4 && pokemon.level < 70) {
-    await ClickXBall(page, Pokeballe.ultraball );
-  } else if (pokemon.level > 75 ) {
+  } else if (goldenNest) {
     // Rzut wykonujemy zawsze; wynik decyduje tylko o powiadomieniu.
     // W lokacji specjalnej safariball jest jedyna dostepna kula, wiec
     // oszczedzanie (saveSafariBall) tu nie obowiazuje.
@@ -158,22 +190,65 @@ async function CatchPokemon(page, pokemon, regionInfo, regionName, battleSlot = 
       ? await ClickXBall(page, Pokeballe.safariball)
       : await ClickXBall(page, Pokeballe.cherishball);
 
-    if (thrown) {
-      await notifyGoldenNest({
-        region: regionName,
-        location: regionInfo.name,
-        pokemon: pokemon.pokemon,
-        level: pokemon.level,
-      });
-    }
-  } else if ((time >= 18 || time < 6) && pokemon.level >= NestBallMaxLvl && pokemon.level < LvlBallMinLvl) {
-    await ClickXBall(page, Pokeballe.nightball);
-  } else if (pokemon.level < NestBallMaxLvl) {
-    await ClickXBall(page, Pokeballe.nestball);
+    // Pierwsza wiadomosc: samo spotkanie. Wysylamy ja niezaleznie od tego,
+    // czy udalo sie rzucic kula - inaczej przegrana walka z Golden Nestem
+    // przeszlaby bez zadnego powiadomienia.
+    await notifyGoldenNest({
+      region: regionName,
+      location: regionInfo.name,
+      pokemon: pokemon.pokemon,
+      level: pokemon.level,
+    });
+
+    // Druga wiadomosc: wynik. Brak rzutu = kuli nie bylo na ekranie.
+    const caught = thrown ? await WasCaught(page) : false;
+    if (!thrown) log.warn('Golden Nest: nie znaleziono kuli na ekranie łapania.');
+    await notifyGoldenNestResult({
+      pokemon: pokemon.pokemon,
+      level: pokemon.level,
+      caught,
+      reason: thrown ? null : 'nie udało się rzucić kulą',
+    });
+
+    // Wynik rzutu decyduje, czy zostajemy na lokacji (nieudany - gniazdo
+    // dalej aktywne), czy idziemy dalej (zlapany - gniazdo wykorzystane).
+    // thrown=false to co innego niz nieudany rzut: kuli nie bylo na ekranie,
+    // wiec nie ma czego pilnowac - blokada nie ma wtedy sensu.
+    return { goldenNest: thrown, caught };
+  } else if (pokemon.catchDiff >= (pokemon.level < LvlBallMinLvl ? 5 : 4) && pokemon.level < UltraBallMaxLvl) {
+    // Trudne pokemony do 70 poziomu lapiemy ultraballem - ma pierwszenstwo
+    // przed levelballem. Ponizej 30 poziomu ultraball zostawiamy tylko na
+    // diff 5; diff 4 idzie wtedy greatballem/nightballem.
+    await ClickXBall(page, Pokeballe.ultraball );
   } else if (pokemon.level >= LvlBallMinLvl) {
     await ClickXBall(page, Pokeballe.levelball);
+  } else if ((time >= 18 || time < 6) && pokemon.level < NightBallMaxLvl) {
+    await ClickXBall(page, Pokeballe.nightball);
+  } else if (pokemon.level < NestBallMaxLvl && pokemon.catchDiff < 3) {
+    // Diff 3 i wyzej ponizej 20 poziomu pomija nestballa i schodzi
+    // do greatballa (w nocy przechwytuje je wczesniej nightball).
+    await ClickXBall(page, Pokeballe.nestball);
   } else {
     await ClickXBall(page, Pokeballe.greatball);
+  }
+
+  return { goldenNest: false };
+}
+
+// Sprawdza, czy rzut kula zakonczyl sie zlapaniem. Gra wypisuje wtedy
+// komunikat "Udało Ci się..." w zielonym alercie; ucieczka lub przegrana
+// laduje w alercie czerwonym. Brak komunikatu traktujemy jak nieudany rzut -
+// w trybie Shiny bezpieczniej zostac na lokacji niz ja opuscic.
+async function WasCaught(page) {
+  try {
+    const alert = await page.waitForSelector('div.alert.alert-success.text-center', { timeout: 3000 });
+    const text = await page.evaluate(el => el.textContent, alert);
+    const caught = String(text || '').includes('Udało Ci się');
+    log.info(caught ? 'Pokemon złapany.' : `Rzut nieudany: ${String(text || '').trim()}`);
+    return caught;
+  } catch (e) {
+    log.info('Rzut nieudany - brak potwierdzenia złapania.');
+    return false;
   }
 }
 
@@ -207,6 +282,7 @@ async function checkCatchingDiff(page) {
 
 module.exports = {
   CheckUltraBeast,
+  IsGoldenNest,
   ClickAdventure,
   CheckIfPokemon,
   ClickPokemon,

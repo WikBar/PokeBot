@@ -185,15 +185,57 @@ function buildGoldenNestMessage({ region, location, pokemon, level }) {
   return `W regionie ${regionName}, w lokacji ${locationName} spotkano Shiny pokemona ${pokemonName} i poziom ${levelText}.`;
 }
 
+// Druga wiadomość: co się stało z napotkanym Golden Nestem.
+// Wysyłana zawsze, także gdy do rzutu w ogóle nie doszło (przegrana walka).
+function buildGoldenNestResultMessage({ pokemon, level, caught, reason }) {
+  const pokemonName = pokemon || 'nieznany';
+  const levelText = level === undefined || level === null ? 'nieznany' : level;
+  if (caught) return `Shiny ${pokemonName} (poziom ${levelText}) ZŁAPANY!`;
+  const why = reason ? ` (${reason})` : '';
+  return `Shiny ${pokemonName} (poziom ${levelText}) NIE został złapany${why}.`;
+}
+
+// Postęp blokady po nieudanym Golden Nescie - wysyłany co N wypraw.
+function buildShinyHoldMessage({ location, remaining }) {
+  const locationName = location || 'nieznanej';
+  return `Golden Nest: zostaję w lokacji ${locationName} jeszcze ${remaining} wypraw.`;
+}
+
+// Po złapaniu Golden Nesta - dokąd bot idzie dalej.
+function buildShinyNextLocationMessage({ pokemon, nextLocation }) {
+  const pokemonName = pokemon || 'nieznany';
+  const nextName = nextLocation || 'nieznana';
+  return `Shiny ${pokemonName} złapany - przechodzę do lokacji ${nextName}.`;
+}
+
 // Powiadomienie o Golden Nest (poziom >75).
 async function notifyGoldenNest({ region, location, pokemon, level }) {
   return sendNotification(buildGoldenNestMessage({ region, location, pokemon, level }));
 }
 
+// Powiadomienie o wyniku - osobna wiadomość, żeby dotarła także przy przegranej.
+async function notifyGoldenNestResult({ pokemon, level, caught, reason }) {
+  return sendNotification(buildGoldenNestResultMessage({ pokemon, level, caught, reason }));
+}
+
+async function notifyShinyHold({ location, remaining }) {
+  return sendNotification(buildShinyHoldMessage({ location, remaining }));
+}
+
+async function notifyShinyNextLocation({ pokemon, nextLocation }) {
+  return sendNotification(buildShinyNextLocationMessage({ pokemon, nextLocation }));
+}
+
 module.exports = {
   sendNotification,
   buildGoldenNestMessage,
+  buildGoldenNestResultMessage,
+  buildShinyHoldMessage,
+  buildShinyNextLocationMessage,
   notifyGoldenNest,
+  notifyGoldenNestResult,
+  notifyShinyHold,
+  notifyShinyNextLocation,
   isNotifierConfigured,
   getProvider,
 };
