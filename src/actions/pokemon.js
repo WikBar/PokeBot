@@ -13,6 +13,31 @@ function numberOr(value, fallback) {
   return Number.isFinite(n) && n >= 0 ? n : fallback;
 }
 
+// Zamyka otwarte okno modalne (np. "opcje-budynku"), ktore przykrywa strone
+// i przechwytuje klikniecia. Nie rzuca - brak modala to normalny stan.
+async function closeOpenModal(page) {
+  try {
+    const modal = page.locator('.modal.in, .modal.show').first();
+    if (await modal.count() === 0) return false;
+
+    log.debug('Wykryto otwarte okno modalne - zamykam.');
+    // Najpierw przycisk zamkniecia, potem Escape jako zapas.
+    const closeBtn = modal.locator('button.close, .modal-header .close').first();
+    if (await closeBtn.count() > 0) {
+      await closeBtn.click({ timeout: 3000 }).catch(() => {});
+    } else {
+      await page.keyboard.press('Escape').catch(() => {});
+    }
+
+    // Czekamy az zniknie, zeby nie klikac w chowajace sie okno.
+    await modal.waitFor({ state: 'hidden', timeout: 3000 }).catch(() => {});
+    return true;
+  } catch (e) {
+    log.debug('Nie udało się zamknąć okna modalnego', { error: String(e) });
+    return false;
+  }
+}
+
 async function SellPokemon(page, pokemonToSell, diff3Pokemons = [], protectedPokemon = [], diff4Pokemons = [], options = {}) {
   if (!Array.isArray(pokemonToSell) || pokemonToSell.length === 0) {
     log.info("Brak listy pokemonów do sprzedaży.");
@@ -31,6 +56,11 @@ async function SellPokemon(page, pokemonToSell, diff3Pokemons = [], protectedPok
   if (protectedList.length > 0) {
     log.info(`Chronione przed sprzedażą: ${protectedList.join(', ')}`);
   }
+  // Otwarte okno "opcje-budynku" przykrywa strone i przechwytuje klikniecia -
+  // Playwright ponawia je wtedy przez 30 s i konczy TimeoutError. Zamykamy je,
+  // zanim sprobujemy kliknac ikone sprzedazy.
+  await closeOpenModal(page);
+
   await page.getByRole('img', { name: 'Sprzedaj Pokemony z Przechowalni' }).click();
   log.info("Jesteś w Hodowli Pokemonów");
   await page.waitForSelector('label.btn-hodowla', { timeout: 10000 });

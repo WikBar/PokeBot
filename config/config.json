@@ -10,12 +10,13 @@
   "limitsEnabled": true,
   "diff3Keep": 5,
   "diff4Keep": 15,
-  "autoRepelEnabled": true,
+  "autoRepelEnabled": false,
   "autoRepelKind": "repel",
   "autoRepelTier": 1,
   "autoRepelMin": 2,
   "saveSafariBall": true,
   "activityMode": "trening",
+  "adventureDelay": 1200,
   "sellablePokemon": [
     "Zubat",
     "Magikarp",
@@ -265,7 +266,13 @@
     "Vulpix Alola",
     "Stufful",
     "Sandshrew Alola",
-    "Diglett Alola"
+    "Diglett Alola",
+    "Cutiefly",
+    "Bounsweet",
+    "Exeggutor Alola",
+    "Ninetales Alola",
+    "Crabominable",
+    "Sandslash Alola"
   ],
   "protectedPokemon": [
     "Flabébé"
@@ -307,7 +314,9 @@
     "Furfrou",
     "Golurk",
     "Duosion",
-    "Raticate Alola"
+    "Raticate Alola",
+    "Rowlet",
+    "Steenee"
   ],
   "diff4CatchPokemons": [
     "Zebstrika",
@@ -339,7 +348,15 @@
     "Gogoat",
     "Bewear",
     "Dugtrio Alola",
-    "Drampa"
+    "Drampa",
+    "Oricorio Pau",
+    "Tsareena",
+    "Dartrix",
+    "Ribombee",
+    "Oricorio Pom Pom",
+    "Comfey",
+    "Oricorio Sensu",
+    "Oricorio Baile"
   ],
   "diff5CatchPokemons": [
     "Bouffalant",
@@ -348,7 +365,10 @@
     "Sigilyph",
     "Delphox",
     "Greninja",
-    "Chesnaught"
+    "Chesnaught",
+    "Decidueye",
+    "Oranguru",
+    "Passimian"
   ],
   "diff0CatchPokemons": []
 }

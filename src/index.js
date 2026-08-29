@@ -19,7 +19,12 @@ const log = logger.child({ module: 'main' });
 
 // Constants
 const HP_THRESHOLD = 15;
-const ADVENTURE_TIMEOUT = 3000;
+// Przerwa po kazdej wyprawie. ClickAdventure czeka juz na networkidle,
+// wiec to tylko zapas bezpieczenstwa - stad da sie ja skrocic.
+// Regulowana z panelu (adventureDelay w config.json); ponizej 300 ms
+// nie schodzimy, zeby nie zasypywac serwera gry zadaniami.
+const ADVENTURE_TIMEOUT_DEFAULT = 3000;
+const ADVENTURE_TIMEOUT_MIN = 300;
 const REGEN_WAIT_MINUTES = 12;
 const REGEN_ITERATIONS = 10;
 // Poniżej tego poziomu wybieramy do walki pokemona o wspólnym typie.
@@ -318,7 +323,13 @@ while (true){
       }else{
         log.info("Brak Pokemona na przygodzie");
       }
-      await page.waitForTimeout(ADVENTURE_TIMEOUT);
+      // Wartosc czytana z configu przy kazdej iteracji, wiec zmiana
+      // w panelu dziala od razu, bez restartu bota.
+      const adventureDelay = Math.max(
+        ADVENTURE_TIMEOUT_MIN,
+        Number(accountConfig.adventureDelay) || ADVENTURE_TIMEOUT_DEFAULT
+      );
+      await page.waitForTimeout(adventureDelay);
       paResult = await CheckPA(page);
       state.updateStats({ pa: { current: paResult.currentPA, max: paResult.maxPA } });
 
