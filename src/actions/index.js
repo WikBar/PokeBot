@@ -1,4 +1,4 @@
-const { ClickAdventure, CheckIfPokemon, ClickPokemon, CatchPokemon, checkCatchingDiff } = require('./adventure');
+const { ClickAdventure, CheckIfPokemon, ClickPokemon, CatchPokemon, checkCatchingDiff, CheckUltraBeast } = require('./adventure');
 const { ClickContinue, CancelActivity, StartActivity } = require('./activity');
 const { CheckHP, ClickHospital, EatRawstBerry } = require('./health');
 const { CheckPA, CheckStorage } = require('./stats');
@@ -13,6 +13,7 @@ module.exports = {
   ClickPokemon,
   CatchPokemon,
   checkCatchingDiff,
+  CheckUltraBeast,
   ClickContinue,
   CancelActivity,
   StartActivity,

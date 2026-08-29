@@ -63,6 +63,27 @@ async function ClickAdventure(page, account, locations) {
   log.info('Wyprawa kliknięta', { location: spotName });
 }
 
+// Ultra Bestia: podczas wyprawy potrafi pojawic sie szczelina w czasoprzestrzeni
+// z przyciskiem "Walcz z Ultra Bestia". Klikniecie przenosi przez portal
+// i rozpoczyna walke; po wygranej Bestie mozna zlapac WYLACZNIE beastballem
+// (poza masterballem, ktorego nie ruszamy - jest go kilka sztuk).
+// Zwraca true, gdy portal zostal wykryty i klikniety.
+async function CheckUltraBeast(page) {
+  try {
+    const btn = page.locator('button:has-text("Walcz z Ultra Bestią"), a:has-text("Walcz z Ultra Bestią"), input[value*="Walcz z Ultra Bestią"]').first();
+    if (await btn.count() === 0) return false;
+
+    log.info('Ultra Bestia: wykryto szczelinę - wchodzę w portal.');
+    await btn.click();
+    try { await page.waitForLoadState('networkidle', { timeout: 8000 }); } catch { /* ignore */ }
+    await page.waitForTimeout(2000);
+    return true;
+  } catch (e) {
+    log.warn('Ultra Bestia: błąd przy wejściu w portal', { error: String(e) });
+    return false;
+  }
+}
+
 async function CheckIfPokemon(page) {
   const element = await page.$('div.panel.panel-primary.nopadding.nomargin');
   const pokemonInfo = {};
@@ -104,6 +125,15 @@ async function CatchPokemon(page, pokemon, regionInfo, regionName, battleSlot = 
   // na trudnosc. Brak ustawienia traktujemy jak wlaczone.
   const saveSafariBall = options.saveSafariBall !== false;
   const useSafari = regionInfo.isSpecial && (!saveSafariBall || pokemon.catchDiff >= 3);
+
+  // Ultra Bestia: po walce dostepny jest wylacznie beastball (i masterball,
+  // ktorego nie ruszamy). Sprawdzamy jako pierwsze - kazdy inny warunek
+  // probowalby rzucic kula, ktorej nie ma na ekranie.
+  if (options.ultraBeast) {
+    const thrown = await ClickXBall(page, Pokeballe.beastball);
+    if (!thrown) log.warn('Ultra Bestia: nie znaleziono beastballa na ekranie łapania.');
+    return;
+  }
 
   // Poziom >75 = Golden Nest. Sprawdzamy jako pierwsze, żeby alert wyszedł
   // także w lokacjach specjalnych (inaczej przechwyciłby je warunek safariball).
@@ -176,6 +206,7 @@ async function checkCatchingDiff(page) {
 }
 
 module.exports = {
+  CheckUltraBeast,
   ClickAdventure,
   CheckIfPokemon,
   ClickPokemon,

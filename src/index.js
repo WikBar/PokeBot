@@ -1,7 +1,7 @@
 require('dotenv').config({ path: require('path').resolve(__dirname, '..', process.env.NODE_ENV === 'production' ? '.env.production' : '.env') }); // Wczytujemy login i hasło z pliku .env
 const { chromium } = require('playwright'); // Importujemy przeglądarkę
 const { CheckPA, CheckStorage, ClickAdventure, CheckIfPokemon,
-   CatchPokemon, ClickPokemon,
+   CatchPokemon, ClickPokemon, CheckUltraBeast,
    CancelActivity, StartActivity,
    CheckHP, ClickHospital,
    SellPokemon, login, isSessionAlive, UpdateTeamIfDue }  = require('./actions');
@@ -254,8 +254,27 @@ while (true){
 
     await CheckIfGoodEvent(page)
     await CheckIfBadEvent(page)
+
+    // Szczelina z Ultra Bestią pojawia się zamiast zwykłego spotkania.
+    // Po wejściu w portal walka rozgrywa się od razu, bez wyboru pokemona,
+    // więc od razu sprawdzamy, co da się złapać.
+    const ultraBeast = await CheckUltraBeast(page);
+
     const pokemonInfo= await CheckIfPokemon(page);
-      if (pokemonInfo.isPokemon){
+
+    if (ultraBeast) {
+      state.updateStats({ lastEvent: 'ultra_beast' });
+      if (pokemonInfo.isPokemon) {
+        log.info(`Ultra Bestia: ${pokemonInfo.pokemon} (poziom ${pokemonInfo.level}) - rzucam beastballem.`);
+        await CatchPokemon(page, pokemonInfo, locationInfo, accountConfig.region, null,
+          { ultraBeast: true });
+        state.updateStats({ lastEvent: 'ultra_beast_caught' });
+      } else {
+        log.info('Ultra Bestia: po walce brak pokemona do złapania.');
+      }
+    }
+
+      if (pokemonInfo.isPokemon && !ultraBeast){
         await categorizePokemon(pokemonInfo, accountConfig, configPath);
 
         // Poniżej 50 poziomu wysyłamy do walki pokemona o typie wspólnym
