@@ -256,8 +256,8 @@ while (true){
     await CheckIfBadEvent(page)
 
     // Szczelina z Ultra Bestią pojawia się zamiast zwykłego spotkania.
-    // Po wejściu w portal walka rozgrywa się od razu, bez wyboru pokemona,
-    // więc od razu sprawdzamy, co da się złapać.
+    // Po wejściu w portal Bestia czeka jak zwykły pokemon — trzeba wysłać
+    // do niej pokemona z drużyny, a dopiero po wygranej rzucić beastballem.
     const ultraBeast = await CheckUltraBeast(page);
 
     const pokemonInfo= await CheckIfPokemon(page);
@@ -265,12 +265,25 @@ while (true){
     if (ultraBeast) {
       state.updateStats({ lastEvent: 'ultra_beast' });
       if (pokemonInfo.isPokemon) {
-        log.info(`Ultra Bestia: ${pokemonInfo.pokemon} (poziom ${pokemonInfo.level}) - rzucam beastballem.`);
-        await CatchPokemon(page, pokemonInfo, locationInfo, accountConfig.region, null,
-          { ultraBeast: true });
-        state.updateStats({ lastEvent: 'ultra_beast_caught' });
+        log.info(`Ultra Bestia: ${pokemonInfo.pokemon} (poziom ${pokemonInfo.level}) - wysyłam pokemona do walki.`);
+
+        // Bestie są wysokopoziomowe, więc do walki idzie główny pokemon.
+        const team = await loadTeam();
+        const battleIndex = accountConfig.pokemonIndex;
+        await ClickPokemon(page, battleIndex);
+
+        // Beastballa rzucamy dopiero po wygranej (tak jak przy zwykłym
+        // spotkaniu) — inaczej ekranu łapania jeszcze nie ma.
+        if (await CheckIfGoodEvent(page) == 3) {
+          log.info('Ultra Bestia: walka wygrana - rzucam beastballem.');
+          await CatchPokemon(page, pokemonInfo, locationInfo, accountConfig.region,
+            team[battleIndex] || null, { ultraBeast: true });
+          state.updateStats({ lastEvent: 'ultra_beast_caught' });
+        } else {
+          log.warn('Ultra Bestia: walka nie zakończyła się zwycięstwem.');
+        }
       } else {
-        log.info('Ultra Bestia: po walce brak pokemona do złapania.');
+        log.info('Ultra Bestia: po przejściu portalu brak pokemona.');
       }
     }
 
