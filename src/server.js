@@ -20,7 +20,7 @@ const ALLOWED_CONFIG_KEYS = new Set([
   'sellThreshold', 'limitsEnabled', 'diff3Keep', 'diff4Keep',
   'autoRepelEnabled', 'autoRepelKind', 'autoRepelTier', 'autoRepelMin',
   'saveSafariBall', 'activityMode', 'adventureDelay',
-  'shinyHunt', 'shinyHuntTries', 'skippedAdventures',
+  'shinyHunt', 'shinyHuntTries', 'skippedAdventures', 'strongBallPokemons',
   'diff3CatchPokemons', 'diff4CatchPokemons', 'diff5CatchPokemons', 'diff0CatchPokemons'
 ]);
 

@@ -139,6 +139,12 @@ async function ClickPokemon(page, PokemonIndex) {
   }
 }
 
+// Porownanie nazw odporne na wielkosc liter i podwojne spacje - listy
+// z panelu wpisuje czlowiek, a nazwa ze strony bywa z dodatkowa spacja.
+function normalizePokemonName(name) {
+  return String(name || '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
 async function CatchPokemon(page, pokemon, regionInfo, regionName, battleSlot = null, options = {}) {
   log.info(`Łapię: ${pokemon?.pokemon} Poziom: ${pokemon?.level} o ${new Date().toLocaleTimeString()}`);
   const NestBallMaxLvl = 20;
@@ -158,6 +164,15 @@ async function CatchPokemon(page, pokemon, regionInfo, regionName, battleSlot = 
   const saveSafariBall = options.saveSafariBall !== false;
   const useSafari = regionInfo.isSpecial && (!saveSafariBall || pokemon.catchDiff >= 3);
 
+  // Lista z panelu web: te pokemony lapiemy greatballem (w dzien) albo
+  // nightballem (w nocy) zamiast slabszych kul - pokeballa, friendballa,
+  // nestballa i lureballa. Reszta lancucha dziala bez zmian, wiec Golden
+  // Nest, safariball i ultraball nadal maja pierwszenstwo.
+  const strongBallList = Array.isArray(options.strongBallPokemons) ? options.strongBallPokemons : [];
+  const useStrongBall = strongBallList.some(
+    (name) => normalizePokemonName(name) === normalizePokemonName(pokemon.pokemon)
+  );
+
   // Ultra Bestia: po walce dostepny jest wylacznie beastball (i masterball,
   // ktorego nie ruszamy). Sprawdzamy jako pierwsze - kazdy inny warunek
   // probowalby rzucic kula, ktorej nie ma na ekranie.
@@ -173,6 +188,14 @@ async function CatchPokemon(page, pokemon, regionInfo, regionName, battleSlot = 
   const goldenNest = options.goldenNest === true;
    if (useSafari && !goldenNest) {
     await ClickXBall(page, Pokeballe.safariball);
+  } else if (useStrongBall && pokemon.level < LvlBallMinLvl && pokemon.catchDiff < 5) {
+    // Lista zastepuje tylko slabe kule (pokeball, friendball, nestball,
+    // lureball), ktore wystepuja ponizej 30 poziomu przy trudnosci <5.
+    // Levelballa (od 30 lvl) i ultraballa (diff 5) nie podmieniamy -
+    // slabsza kula bylaby tam gorszym wyborem.
+    const night = (time >= 18 || time < 6);
+    log.info(`${pokemon.pokemon} z listy mocnych kul - rzucam ${night ? 'nightballem' : 'greatballem'}.`);
+    await ClickXBall(page, night ? Pokeballe.nightball : Pokeballe.greatball);
   } else if (pokemon.level < LureBallMaxLvl && pokemon.catchDiff <= 2 && sharesType(pokemon.types, battleSlot)) {
       // Lureball ma pierwszenstwo przed pokeballem i friendballem: ponizej 30
       // poziomu, trudnosc <=2 i typ wspolny z pokemonem wyslanym do walki.

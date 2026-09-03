@@ -373,5 +373,6 @@
   "diff0CatchPokemons": [],
   "shinyHunt": false,
   "shinyHuntTries": 20,
-  "skippedAdventures": []
+  "skippedAdventures": [],
+  "strongBallPokemons": []
 }

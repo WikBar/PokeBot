@@ -430,7 +430,8 @@ while (true){
         const battleWon = await CheckIfGoodEvent(page) == 3;
         if (battleWon){
           const catchResult = await CatchPokemon(page,pokemonInfo,locationInfo,accountConfig.region,battleSlot,
-            { saveSafariBall: accountConfig.saveSafariBall, goldenNest: isGoldenNest });
+            { saveSafariBall: accountConfig.saveSafariBall, goldenNest: isGoldenNest,
+              strongBallPokemons: accountConfig.strongBallPokemons });
           if (isGoldenNest) {
             goldenNestFound = true;
             goldenNestCaught = !!catchResult?.caught;
