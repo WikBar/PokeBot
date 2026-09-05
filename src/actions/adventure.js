@@ -236,10 +236,10 @@ async function CatchPokemon(page, pokemon, regionInfo, regionName, battleSlot = 
     // thrown=false to co innego niz nieudany rzut: kuli nie bylo na ekranie,
     // wiec nie ma czego pilnowac - blokada nie ma wtedy sensu.
     return { goldenNest: thrown, caught };
-  } else if (pokemon.catchDiff >= (pokemon.level < LvlBallMinLvl ? 5 : 4) && pokemon.level < UltraBallMaxLvl) {
-    // Trudne pokemony do 70 poziomu lapiemy ultraballem - ma pierwszenstwo
-    // przed levelballem. Ponizej 30 poziomu ultraball zostawiamy tylko na
-    // diff 5; diff 4 idzie wtedy greatballem/nightballem.
+  } else if (pokemon.catchDiff >= 5 && pokemon.level < UltraBallMaxLvl) {
+    // Ultraball tylko na najtrudniejsze (diff 5) do 70 poziomu. Diff 4
+    // idzie zwyklym lancuchem: ponizej 30 poziomu greatball/nightball,
+    // od 30 - levelball.
     await ClickXBall(page, Pokeballe.ultraball );
   } else if (pokemon.level >= LvlBallMinLvl) {
     await ClickXBall(page, Pokeballe.levelball);
