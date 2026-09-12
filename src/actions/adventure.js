@@ -145,6 +145,17 @@ function normalizePokemonName(name) {
   return String(name || '').trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
+// Rzuca ultraballem, a gdy go nie ma na ekranie (skonczyl sie w plecaku)
+// - premierballem. ClickXBall zwraca false, gdy kuli nie znalazl, wiec
+// wystarczy sprawdzic wynik zamiast odpytywac plecak.
+async function ThrowUltraOrPremier(page) {
+  if (await ClickXBall(page, Pokeballe.ultraball)) return true;
+  log.info('Brak ultraballi na ekranie - rzucam premierballem.');
+  if (await ClickXBall(page, Pokeballe.premierball)) return true;
+  log.warn('Brak ultraballi i premierballi na ekranie łapania.');
+  return false;
+}
+
 async function CatchPokemon(page, pokemon, regionInfo, regionName, battleSlot = null, options = {}) {
   log.info(`Łapię: ${pokemon?.pokemon} Poziom: ${pokemon?.level} o ${new Date().toLocaleTimeString()}`);
   const NestBallMaxLvl = 20;
@@ -193,7 +204,7 @@ async function CatchPokemon(page, pokemon, regionInfo, regionName, battleSlot = 
     // i trudnosc. Wyjatkiem sa tylko warunki sprawdzane wyzej: Ultra Bestia,
     // Golden Nest i lokacja specjalna, gdzie ultraballa nie ma na ekranie.
     log.info(`${pokemon.pokemon} z listy mocnych kul - rzucam ultraballem.`);
-    await ClickXBall(page, Pokeballe.ultraball);
+    await ThrowUltraOrPremier(page);
   } else if (pokemon.level < LureBallMaxLvl && pokemon.catchDiff <= 2 && sharesType(pokemon.types, battleSlot)) {
       // Lureball ma pierwszenstwo przed pokeballem i friendballem: ponizej 30
       // poziomu, trudnosc <=2 i typ wspolny z pokemonem wyslanym do walki.
@@ -240,7 +251,7 @@ async function CatchPokemon(page, pokemon, regionInfo, regionName, battleSlot = 
     // Ultraball tylko na najtrudniejsze (diff 5) do 70 poziomu. Diff 4
     // idzie zwyklym lancuchem: ponizej 30 poziomu greatball/nightball,
     // od 30 - levelball.
-    await ClickXBall(page, Pokeballe.ultraball );
+    await ThrowUltraOrPremier(page);
   } else if (pokemon.level >= LvlBallMinLvl) {
     await ClickXBall(page, Pokeballe.levelball);
   } else if ((time >= 18 || time < 6) && pokemon.level < NightBallMaxLvl) {
