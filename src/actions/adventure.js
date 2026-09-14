@@ -91,19 +91,25 @@ async function CheckUltraBeast(page) {
 // wywolujacy musi dodatkowo sprawdzic poziom pokemona (>75).
 async function IsGoldenNest(page) {
   try {
-    const buttons = await page.$$('button.btn-akcja');
-    if (buttons.length < 2) return false;
+    // Golden Nest poznajemy po ZOLTYM przycisku akcji: gra renderuje go
+    // z klasa btn-warning zamiast zwyklego btn-primary. Zweryfikowane na
+    // zywej stronie - przy Ledybie poziom 100 przycisk wygladal tak:
+    //   <button class="btn btn-akcja btn-warning btn-block">Kontynuuj</button>
+    // Przy zwyklej wyprawie oba przyciski akcji sa btn-primary (jeden
+    // disabled z kreska "---", drugi aktywny "Kontynuuj").
+    const golden = await page.$$('button.btn-akcja.btn-warning');
+    if (golden.length === 0) return false;
 
-    let continueCount = 0;
-    for (const btn of buttons) {
+    // Sam kolor nie wystarcza - upewniamy sie, ze przycisk jest aktywny
+    // i faktycznie prowadzi dalej.
+    for (const btn of golden) {
+      const disabled = await btn.isDisabled().catch(() => true);
+      if (disabled) continue;
       const text = String(await btn.innerText().catch(() => '')).trim();
-      if (text.toLowerCase().includes('kontynuuj')) continueCount++;
+      log.info(`Golden Nest wykryty (żółty przycisk "${text}").`);
+      return true;
     }
-
-    // Dwa "Kontynuuj" zamiast jednego = Golden Nest.
-    const isGolden = continueCount >= 2;
-    if (isGolden) log.info('Golden Nest wykryty (dwa przyciski "Kontynuuj").');
-    return isGolden;
+    return false;
   } catch (e) {
     log.debug('Nie udało się sprawdzić Golden Nest', { error: String(e) });
     return false;
