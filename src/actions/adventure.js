@@ -258,6 +258,10 @@ async function CatchPokemon(page, pokemon, regionInfo, regionName, battleSlot = 
     // idzie zwyklym lancuchem: ponizej 30 poziomu greatball/nightball,
     // od 30 - levelball.
     await ThrowUltraOrPremier(page);
+  } else if (pokemon.catchDiff === 4) {
+    // Diff 4 zawsze levelballem - takze ponizej 30 poziomu, gdzie
+    // lancuch rzucalby greatballem albo nightballem.
+    await ClickXBall(page, Pokeballe.levelball);
   } else if (pokemon.level >= LvlBallMinLvl) {
     await ClickXBall(page, Pokeballe.levelball);
   } else if ((time >= 18 || time < 6) && pokemon.level < NightBallMaxLvl) {
