@@ -50,7 +50,8 @@ async function main() {
   console.log(`Logi: ${files.map((f) => path.basename(f)).join(', ')}`);
   console.log(`Okres: ${fmt(stats.from)} → ${fmt(stats.to)}, ${stats.lines} wpisów`);
   console.log(`Starty: ${stats.starts}, błędy pętli: ${stats.errors}, krytyczne: ${stats.fatal}`);
-  console.log(`Łapanie: ${stats.caught}, Golden Nest: ${stats.goldenNests} (złapane ${stats.goldenNestsCaught}), sprzedaże: ${stats.sales}\n`);
+  console.log(`Łapanie: ${stats.caught}, Golden Nest: ${stats.goldenNests} (złapane ${stats.goldenNestsCaught}), sprzedaże: ${stats.sales}`);
+  console.log(`Przychód: ${stats.yen.toLocaleString('pl-PL')} ¥ (walki i minerały)\n`);
 
   if (findings.length === 0) console.log('Brak anomalii.');
   for (const f of findings) {

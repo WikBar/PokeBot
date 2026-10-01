@@ -25,6 +25,7 @@ const { decideRepelUse } = require('./logic/repel');
 const { resolveRuntime } = require('./logic/runtime');
 const { loadRuntime, saveRuntime, loadShinyStats, saveShinyStats } = require('./utils/runtimeStore');
 const { recordTrip } = require('./logic/shinyStats');
+const { sellOptions } = require('./logic/storage');
 
 const log = logger.child({ module: 'main' });
 
@@ -275,6 +276,15 @@ async function advanceToNextLocation(region, accountConfig, reason, options = {}
   return { nr: next.nr, name: next.name };
 }
 
+// Sprzedaz z Hodowli. Przy prawie pelnej przechowalni (logic/storage.js)
+// sprzedajemy bez czekania na sellThreshold.
+async function sellFromStorage(page, accountConfig) {
+  const { forced, ...options } = sellOptions(accountConfig, state.getState().storage);
+  if (forced) log.info('Przechowalnia prawie pełna - sprzedaję bez progu sellThreshold.');
+  await SellPokemon(page, accountConfig.sellablePokemon, accountConfig.diff3CatchPokemons,
+    accountConfig.protectedPokemon, accountConfig.diff4CatchPokemons, options);
+}
+
 async function categorizePokemon(pokemonInfo, accountConfig, configPath) {
   const diff = pokemonInfo.catchDiff;
   const target = targetListFor(diff, pokemonInfo.pokemon, accountConfig.protectedPokemon);
@@ -326,12 +336,7 @@ while (true){
   let locationInfo = region[locationKey];
   const paBuffer = accountConfig.paBuffer || 0;
   await runDailyActions(page);
-  await SellPokemon(page, accountConfig.sellablePokemon, accountConfig.diff3CatchPokemons, accountConfig.protectedPokemon, accountConfig.diff4CatchPokemons, {
-    sellThreshold: accountConfig.sellThreshold,
-    limitsEnabled: accountConfig.limitsEnabled,
-    diff3Keep: accountConfig.diff3Keep,
-    diff4Keep: accountConfig.diff4Keep,
-  });
+  await sellFromStorage(page, accountConfig);
 
   let paResult = await CheckPA(page);
   state.updateStats({ pa: { current: paResult.currentPA, max: paResult.maxPA } });
@@ -657,12 +662,7 @@ while (true){
     await page.reload();
     log.info("Czekam na odnowienie punktów akcji");
     state.updateStats({ lastEvent: 'waiting_for_pa_regen' });
-    await SellPokemon(page, accountConfig.sellablePokemon, accountConfig.diff3CatchPokemons, accountConfig.protectedPokemon, accountConfig.diff4CatchPokemons, {
-    sellThreshold: accountConfig.sellThreshold,
-    limitsEnabled: accountConfig.limitsEnabled,
-    diff3Keep: accountConfig.diff3Keep,
-    diff4Keep: accountConfig.diff4Keep,
-  });
+    await sellFromStorage(page, accountConfig);
     let lastDailyCheckHour = -1;
     let lastDailyCheckKey = null;
     for (let i = 0; i < REGEN_ITERATIONS; i++){

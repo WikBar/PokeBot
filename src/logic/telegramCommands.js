@@ -75,7 +75,8 @@ function formatShiny({ region, runtime, locations }, limit = 5) {
 }
 
 function formatReport({ findings, stats }) {
-  const head = `Logi 24 h: łapanie ${stats.caught}, Golden Nest ${stats.goldenNests}, błędy ${stats.errors}, krytyczne ${stats.fatal}`;
+  const yen = Number(stats.yen || 0).toLocaleString('pl-PL');
+  const head = `Logi 24 h: łapanie ${stats.caught}, Golden Nest ${stats.goldenNests}, przychód ${yen} ¥, błędy ${stats.errors}, krytyczne ${stats.fatal}`;
   if (!findings.length) return `${head}\nBrak anomalii.`;
   return [head, ...findings.slice(0, 10).map((f) => `- ${f.message}`)].join('\n');
 }

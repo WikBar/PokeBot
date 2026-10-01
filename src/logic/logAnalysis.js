@@ -10,6 +10,13 @@ const ERRORS_PER_HOUR = 6;            // "Error in main loop" w ciagu godziny
 const MEDKIT_PER_HOUR = 5;            // "Tracisz punkty Apteczki" w ciagu godziny
 const STORAGE_FULL_RATIO = 0.95;
 
+// Przychod z wpisu: "Wygrywasz walkę i otrzymujesz 209.847 ¥!",
+// "Otrzymujesz 442.150 Yen za sprzedaż Minerałów" (kropka = tysiace).
+function parseYen(msg) {
+  const m = /otrzymujesz\s+(\d[\d.]*)\s*(?:¥|Yen)/i.exec(msg);
+  return m ? parseInt(m[1].replace(/\./g, ''), 10) || 0 : 0;
+}
+
 function parseLine(raw) {
   const m = LINE_RE.exec(raw);
   if (!m) return null;
@@ -29,7 +36,7 @@ function analyzeLogs(entries, { since = 0, nullBytes = 0 } = {}) {
 
   const stats = {
     lines: list.length, starts: 0, errors: 0, fatal: 0, caught: 0, goldenNests: 0,
-    goldenNestsCaught: 0, sales: 0, noUltraball: 0, noBalls: 0, medkit: 0,
+    goldenNestsCaught: 0, sales: 0, noUltraball: 0, noBalls: 0, medkit: 0, yen: 0,
     from: list[0]?.ts ?? null, to: list[list.length - 1]?.ts ?? null,
   };
 
@@ -85,6 +92,7 @@ function analyzeLogs(entries, { since = 0, nullBytes = 0 } = {}) {
     if (msg.startsWith('Golden Nest potwierdzony')) stats.goldenNests++;
     if (/^Shiny: Golden Nest .* złapany na lokacji/.test(msg)) stats.goldenNestsCaught++;
     if (msg.includes("Kliknięto 'Sprzedaj Zaznaczone'")) stats.sales++;
+    stats.yen += parseYen(msg);
     if (msg.startsWith('Brak ultraballi na ekranie')) stats.noUltraball++;
     if (msg.startsWith('Brak ultraballi i premierballi')) stats.noBalls++;
     if (msg.includes('Tracisz punkty Apteczki')) { stats.medkit++; medkitTimes.push(e.ts); }
@@ -161,4 +169,4 @@ function analyzeLogs(entries, { since = 0, nullBytes = 0 } = {}) {
   return { findings, stats };
 }
 
-module.exports = { parseLine, analyzeLogs, GAP_MINUTES };
+module.exports = { parseLine, parseYen, analyzeLogs, GAP_MINUTES };
