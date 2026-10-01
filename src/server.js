@@ -25,30 +25,36 @@ const ALLOWED_CONFIG_KEYS = new Set([
   'diff3CatchPokemons', 'diff4CatchPokemons', 'diff5CatchPokemons', 'diff0CatchPokemons'
 ]);
 
-const API_KEY = process.env.API_KEY || null;
-
-function requireApiKey(req, res, next) {
-  if (!API_KEY) return next();                          // key not configured → open access
-  if (req.method === 'OPTIONS') return next();          // allow CORS preflight
-  if (req.headers['x-api-key'] === API_KEY) return next();
-  log.warn('Unauthorized API request', { ip: req.ip, path: req.path });
-  return res.status(401).json({ ok: false, error: 'Unauthorized: invalid API key' });
+// Klucz API czytany przy tworzeniu aplikacji (testy podaja wlasny).
+function makeRequireApiKey(apiKey) {
+  return function requireApiKey(req, res, next) {
+    if (!apiKey) return next();                           // key not configured → open access
+    if (req.method === 'OPTIONS') return next();          // allow CORS preflight
+    if (req.headers['x-api-key'] === apiKey) return next();
+    log.warn('Unauthorized API request', { ip: req.ip, path: req.path });
+    return res.status(401).json({ ok: false, error: 'Unauthorized: invalid API key' });
+  };
 }
 
-function startServer() {
+// Buduje aplikacje Express bez nasluchiwania - startServer ja uruchamia,
+// a testy wolaja na porcie 0 z wlasnymi sciezkami do plikow.
+function createApp({ paths = {}, apiKey = process.env.API_KEY || null } = {}) {
+  const P = {
+    config: CONFIG_PATH, daily: DAILY_PATH, team: TEAM_PATH, locations: LOCATIONS_PATH,
+    ...paths,
+  };
   const app = express();
-  const port = parseInt(process.env.WEB_PORT, 10) || 4001;
 
   app.use(cors());
   app.use(express.json());
-  app.use(requireApiKey);
+  app.use(makeRequireApiKey(apiKey));
 
   app.get('/api/status', (req, res) => {
     res.json(state.getState());
   });
 
   app.get('/api/config', async (req, res) => {
-    const config = await loadFromFile(CONFIG_PATH);
+    const config = await loadFromFile(P.config);
     res.json(config);
   });
 
@@ -61,35 +67,35 @@ function startServer() {
     if (unknownKeys.length > 0) {
       return res.status(400).json({ ok: false, error: `Unknown config keys: ${unknownKeys.join(', ')}` });
     }
-    const current = await loadFromFile(CONFIG_PATH);
+    const current = await loadFromFile(P.config);
     // Bez obecnego configu zapisalibysmy sam patch - czyli skasowali
     // wszystkie pozostale ustawienia i listy.
     if (!current) {
       return res.status(500).json({ ok: false, error: 'config.json nie da się wczytać - zapis wstrzymany' });
     }
     const updated = { ...current, ...patch };
-    const locations = await loadFromFile(LOCATIONS_PATH);
-    const team = (await loadFromFile(TEAM_PATH))?.team || null;
+    const locations = await loadFromFile(P.locations);
+    const team = (await loadFromFile(P.team))?.team || null;
     const { errors, warnings } = validateConfig(updated, locations, team);
     if (errors.length > 0) {
       log.warn('Config z panelu odrzucony', { errors });
       return res.status(400).json({ ok: false, error: errors.join('; '), errors, warnings });
     }
-    await saveToFile(CONFIG_PATH, updated);
+    await saveToFile(P.config, updated);
     log.info('Config updated via API', { patch });
     res.json({ ok: true, config: updated, warnings });
   });
 
   // Lista regionów dla panelu web — zawsze zgodna z locations.json.
   app.get('/api/regions', async (_req, res) => {
-    const locations = await loadFromFile(LOCATIONS_PATH);
+    const locations = await loadFromFile(P.locations);
     res.json({ regions: locations ? Object.keys(locations) : [] });
   });
 
   // Lokacje danego regionu — panel potrzebuje ich, żeby wiedzieć, które
   // numery wypraw w ogóle istnieją (reszta przełączników jest nieaktywna).
   app.get('/api/locations', async (req, res) => {
-    const locations = await loadFromFile(LOCATIONS_PATH);
+    const locations = await loadFromFile(P.locations);
     if (!locations) return res.json({ locations: [] });
 
     const region = req.query.region;
@@ -114,12 +120,12 @@ function startServer() {
   });
 
   app.get('/api/daily', async (req, res) => {
-    const daily = await loadFromFile(DAILY_PATH);
+    const daily = await loadFromFile(P.daily);
     res.json(daily);
   });
 
   app.get('/api/team', async (_req, res) => {
-    const team = await loadFromFile(TEAM_PATH);
+    const team = await loadFromFile(P.team);
     res.json(team);
   });
 
@@ -138,7 +144,7 @@ function startServer() {
     }
     // Panel web wysyła tylko type1/type2 — zachowujemy nazwę i poziom z dysku,
     // żeby zapis typów ich nie skasował.
-    const currentTeam = (await loadFromFile(TEAM_PATH))?.team || [];
+    const currentTeam = (await loadFromFile(P.team))?.team || [];
     const merged = team.map((slot, i) => ({
       name: slot.name ?? currentTeam[i]?.name ?? '',
       level: slot.level ?? currentTeam[i]?.level ?? null,
@@ -146,7 +152,7 @@ function startServer() {
       type2: slot.type2,
     }));
 
-    await saveToFile(TEAM_PATH, { team: merged });
+    await saveToFile(P.team, { team: merged });
     log.info('Team updated via API');
     res.json({ ok: true, team: merged });
   });
@@ -207,9 +213,20 @@ function startServer() {
     res.json({ ok: true, isPaused, emergencyStop, forceHospital, forceTeamUpdate, useRepelRequest });
   });
 
-  app.listen(port, () => {
-    log.info(`Web server listening on port ${port}`);
-  });
+  return app;
 }
 
-module.exports = { startServer };
+function startServer() {
+  const port = parseInt(process.env.WEB_PORT, 10) || 4001;
+  const server = createApp().listen(port, () => {
+    log.info(`Web server listening on port ${port}`);
+  });
+  // Zajety port (np. stary proces-zombie) nie moze ubic bota - bez panelu
+  // bot dalej gra, a problem widac w logu.
+  server.on('error', (e) => {
+    log.error('Panel API nie wystartował', { error: String(e), port });
+  });
+  return server;
+}
+
+module.exports = { startServer, createApp };

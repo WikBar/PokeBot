@@ -21,6 +21,8 @@ const { isSpecialLocationDay, pickNextLocation } = require('./logic/locations');
 const { createShinyState, maxTriesFrom, shinyStep } = require('./logic/shiny');
 const { targetListFor } = require('./logic/categorize');
 const { decideRepelUse } = require('./logic/repel');
+const { resolveRuntime } = require('./logic/runtime');
+const { loadRuntime, saveRuntime } = require('./utils/runtimeStore');
 
 const log = logger.child({ module: 'main' });
 
@@ -132,15 +134,20 @@ async function AutoUseRepelIfNeeded(page, accountConfig) {
 let lastGoodConfig = null;
 let reportedConfigErrors = '';
 let reportedConfigWarnings = '';
+// Stan roboczy (biezaca lokacja z rotacji + stan Shiny) - patrz
+// logic/runtime.js. Wczytany z dysku, wiec blokada Golden Nest przezywa
+// restart; loadCheckedConfig odrzuci go, jesli config wskazuje inna lokacje.
+let runtime = loadRuntime();
 // Stan trybu Shiny - patrz logic/shiny.js.
-let shiny = null;
+let shiny = runtime?.shiny || null;
+let firstConfigLoad = true;
 
 // Wczytuje config.json z walidacja. Zepsuty plik (np. same zera po zaniku
 // pradu) albo bledne wartosci nie zatrzymuja bota: zostaje na ostatnim
 // poprawnym configu, a problem idzie raz do logu i na Telegram.
 // Rzuca wyjatek tylko wtedy, gdy poprawnego configu nie bylo jeszcze nigdy.
 async function loadCheckedConfig() {
-  const cfg = await loadFromFile(configPath);
+  let cfg = await loadFromFile(configPath);
   const team = (await loadFromFile(teamPath))?.team || null;
   const { errors, warnings } = validateConfig(cfg, locations, team);
 
@@ -157,18 +164,34 @@ async function loadCheckedConfig() {
       await new Promise((resolve) => setTimeout(resolve, 60 * 1000));
       throw new Error(`Brak poprawnego config.json: ${errors[0]}`);
     }
-    return { ...lastGoodConfig };
+    cfg = { ...lastGoodConfig };
+  } else {
+    if (reportedConfigErrors) {
+      log.info('Config znów poprawny.');
+      reportedConfigErrors = '';
+    }
+    const warnKey = warnings.join('|');
+    if (warnings.length > 0 && warnKey !== reportedConfigWarnings) {
+      log.warn('Ostrzeżenia configu', { warnings });
+    }
+    reportedConfigWarnings = warnKey;
+    lastGoodConfig = { ...cfg };
   }
 
-  if (reportedConfigErrors) {
-    log.info('Config znów poprawny.');
-    reportedConfigErrors = '';
+  // Biezaca lokacja z rotacji (runtime-state.json) zamiast adventureNr
+  // z configu - chyba ze uzytkownik zmienil region albo lokacje w configu.
+  const resolved = resolveRuntime(cfg, runtime, locations[cfg.region]);
+  if (resolved.status !== 'kept') {
+    if (resolved.status === 'reset') {
+      log.info(`Zmiana lokacji w configu (${cfg.region} ${cfg.adventureNr}) - rotacja i stan Shiny od nowa.`);
+    } else if (resolved.status === 'invalid') {
+      log.warn('runtime-state.json wskazuje nieistniejącą lokację - zaczynam od configu.');
+    }
+    runtime = resolved.runtime;
+    shiny = createShinyState(runtime.adventureNr);
+    await saveRuntime(runtime);
   }
-  const warnKey = warnings.join('|');
-  if (warnings.length > 0 && warnKey !== reportedConfigWarnings) {
-    log.warn('Ostrzeżenia configu', { warnings });
-  }
-  reportedConfigWarnings = warnKey;
+  cfg.adventureNr = runtime.adventureNr;
 
   if (process.env.POKE_ADVENTURE_NR) {
     const parsedAdventureNr = parseInt(process.env.POKE_ADVENTURE_NR, 10);
@@ -178,8 +201,22 @@ async function loadCheckedConfig() {
       log.warn("Niepoprawna wartość POKE_ADVENTURE_NR, używam wartości z config.json");
     }
   }
-  lastGoodConfig = cfg;
-  return { ...cfg };
+
+  // Po starcie nie wiemy, na jakiej wyprawie gra zostala - klikamy lokacje
+  // wprost zamiast "Kontynuuj".
+  if (firstConfigLoad) {
+    cfg.adventureChanged = true;
+    firstConfigLoad = false;
+  } else {
+    delete cfg.adventureChanged;
+  }
+  return cfg;
+}
+
+// Zapisuje stan Shiny w runtime-state.json (przezywa restart).
+async function persistShiny() {
+  runtime = { ...runtime, shiny };
+  await saveRuntime(runtime);
 }
 
 // Dokleja pokemona do listy w config.json bez nadpisywania zmian z panelu web.
@@ -205,9 +242,10 @@ async function appendToConfigList(configPath, accountConfig, listKey, pokemon) {
 
 // Przechodzi na kolejna nie-specjalna lokacje w regionie (tryb Shiny
 // i randomAdventure - wybor w logic/locations.js).
-// Zapisujemy na swiezej kopii z dysku, zeby nie nadpisac zmian z panelu web.
+// Nowa lokacja idzie do runtime-state.json, nie do config.json - config
+// zostaje ustawieniem uzytkownika (patrz logic/runtime.js).
 // Zwraca { nr, name } albo null, gdy zmiana sie nie powiodla.
-async function advanceToNextLocation(region, accountConfig, configPath, reason, options = {}) {
+async function advanceToNextLocation(region, accountConfig, reason, options = {}) {
   const label = options.label || 'Shiny';
   const next = pickNextLocation(region, accountConfig.adventureNr, accountConfig.skippedAdventures, options);
   if (!next) {
@@ -218,13 +256,8 @@ async function advanceToNextLocation(region, accountConfig, configPath, reason, 
     log.warn(`${label}: pominięto wszystkie lokacje w regionie - ignoruję listę pominiętych.`);
   }
 
-  const fresh = await loadFromFile(configPath);
-  if (fresh) {
-    fresh.adventureNr = next.nr;
-    await saveToFile(configPath, fresh);
-  } else {
-    log.warn(`${label}: nie udało się wczytać config.json - zmieniam tylko w pamięci.`);
-  }
+  runtime = { ...runtime, adventureNr: next.nr };
+  await saveRuntime(runtime);
 
   accountConfig.adventureNr = next.nr;
   accountConfig.adventureChanged = true;   // wymusza klikniecie nowej lokacji
@@ -315,12 +348,13 @@ while (true){
   // wracamy na pierwsza lokacje, zanim bot sprobuje tam wyruszyc.
   if (accountConfig.shinyHunt && locationInfo?.isSpecial && !isSpecialLocationDay()) {
     const reset = await advanceToNextLocation(
-      region, accountConfig, configPath,
+      region, accountConfig,
       'lokacja specjalna niedostępna w tym dniu - wracam na początek',
       { fromStart: true });
     if (reset !== null) {
       locationInfo = region[String(reset.nr)] || locationInfo;
       shiny = createShinyState(reset.nr);
+      await persistShiny();
       shinyLocationChanged = true;
       state.updateStats({ adventureNr: reset.nr });
     }
@@ -474,7 +508,7 @@ while (true){
         if (action.type === 'advance' && action.reason === 'caught') {
           log.info(`Shiny: Golden Nest (${pokemonInfo.pokemon}, poziom ${pokemonInfo.level}) złapany na lokacji ${accountConfig.adventureNr}.`);
           const next = await advanceToNextLocation(
-            region, accountConfig, configPath, 'Golden Nest złapany');
+            region, accountConfig, 'Golden Nest złapany');
           if (next !== null) {
             shiny.locationNr = next.nr;
             shinyLocationChanged = true;
@@ -497,7 +531,7 @@ while (true){
           log.info(`Shiny: próba ${action.tries}/${maxTries} na lokacji ${accountConfig.adventureNr} - brak Golden Nest.`);
           if (action.type === 'advance') {
             const next = await advanceToNextLocation(
-              region, accountConfig, configPath, `${maxTries} wypraw bez Golden Nest`);
+              region, accountConfig, `${maxTries} wypraw bez Golden Nest`);
             if (next !== null) {
               shiny.locationNr = next.nr;
               shinyLocationChanged = true;
@@ -505,6 +539,7 @@ while (true){
           }
         }
         state.updateStats({ shiny: { tries: shiny.tries, maxTries, hold: shiny.hold, location: accountConfig.adventureNr } });
+        await persistShiny();
       }
 
       // Wartosc czytana z configu przy kazdej iteracji, wiec zmiana
@@ -574,7 +609,7 @@ while (true){
     // Wspolna funkcja z trybem Shiny, wiec respektuje tez skippedAdventures.
     if (accountConfig.randomAdventure && !accountConfig.shinyHunt) {
       const next = await advanceToNextLocation(
-        region, accountConfig, configPath, 'następna lokacja', { label: 'randomAdventure' });
+        region, accountConfig, 'następna lokacja', { label: 'randomAdventure' });
       if (next) locationInfo = region[String(next.nr)] || locationInfo;
     }
 
