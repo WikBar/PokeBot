@@ -3,6 +3,7 @@ const { ClickContinue } = require('./activity');
 const { logger } = require('../utils/logger');
 const { notifyGoldenNest, notifyGoldenNestResult } = require('../utils/notifier');
 const { sharesType } = require('./team');
+const { chooseBall } = require('../logic/balls');
 
 const log = logger.child({ module: 'adventure' });
 
@@ -145,12 +146,6 @@ async function ClickPokemon(page, PokemonIndex) {
   }
 }
 
-// Porownanie nazw odporne na wielkosc liter i podwojne spacje - listy
-// z panelu wpisuje czlowiek, a nazwa ze strony bywa z dodatkowa spacja.
-function normalizePokemonName(name) {
-  return String(name || '').trim().replace(/\s+/g, ' ').toLowerCase();
-}
-
 // Rzuca ultraballem, a gdy go nie ma na ekranie (skonczyl sie w plecaku)
 // - premierballem. ClickXBall zwraca false, gdy kuli nie znalazl, wiec
 // wystarczy sprawdzic wynik zamiast odpytywac plecak.
@@ -164,76 +159,33 @@ async function ThrowUltraOrPremier(page) {
 
 async function CatchPokemon(page, pokemon, regionInfo, regionName, battleSlot = null, options = {}) {
   log.info(`Łapię: ${pokemon?.pokemon} Poziom: ${pokemon?.level} o ${new Date().toLocaleTimeString()}`);
-  const NestBallMaxLvl = 20;
-  // Levelball od 30 poziomu wzwyz. Ponizej tego progu zostaja nightball
-  // (wieczorem/noca) i greatball.
-  const LvlBallMinLvl = 30;
-  const NightBallMaxLvl = 30;
-  // Do tego poziomu trudne pokemony (catchDiff >= 4) lapiemy ultraballem,
-  // powyzej - levelballem.
-  const UltraBallMaxLvl = 70;
-  const LureBallMaxLvl = 30;
-  const time = new Date().getHours();
 
-  // Oszczedzanie safariballi (panel web). Wlaczone = rzucamy tylko przy
-  // catchDiff >= 3; wylaczone = w lokacji specjalnej rzucamy bez wzgledu
-  // na trudnosc. Brak ustawienia traktujemy jak wlaczone.
-  const saveSafariBall = options.saveSafariBall !== false;
-  const useSafari = regionInfo.isSpecial && (!saveSafariBall || pokemon.catchDiff >= 3);
+  // Decyzja o kuli jest w logic/balls.js (testowalna bez przegladarki),
+  // tutaj tylko klikamy i obslugujemy powiadomienia.
+  const choice = chooseBall({
+    pokemon,
+    isSpecial: !!regionInfo?.isSpecial,
+    sharesType: sharesType(pokemon?.types, battleSlot),
+    hour: new Date().getHours(),
+    options,
+  });
 
-  // Lista z panelu web: te pokemony lapiemy zawsze ultraballem, bez
-  // wzgledu na poziom i trudnosc. Golden Nest, safariball (lokacja
-  // specjalna) i Ultra Bestia nadal maja pierwszenstwo - tam ultraballa
-  // nie ma na ekranie.
-  const strongBallList = Array.isArray(options.strongBallPokemons) ? options.strongBallPokemons : [];
-  const useStrongBall = strongBallList.some(
-    (name) => normalizePokemonName(name) === normalizePokemonName(pokemon.pokemon)
-  );
-
-  // Ultra Bestia: po walce dostepny jest wylacznie beastball (i masterball,
-  // ktorego nie ruszamy). Sprawdzamy jako pierwsze - kazdy inny warunek
-  // probowalby rzucic kula, ktorej nie ma na ekranie.
-  if (options.ultraBeast) {
+  if (choice.kind === 'beast') {
     const thrown = await ClickXBall(page, Pokeballe.beastball);
     if (!thrown) log.warn('Ultra Bestia: nie znaleziono beastballa na ekranie łapania.');
     return { goldenNest: false };
   }
 
-  // Golden Nest sygnalizuje wywolujacy (przyciski + poziom >75). Sprawdzamy
-  // go jako pierwszy, zeby alert wyszedl takze w lokacjach specjalnych
-  // (inaczej przechwycilby je warunek safariball).
-  const goldenNest = options.goldenNest === true;
-   if (useSafari && !goldenNest) {
-    await ClickXBall(page, Pokeballe.safariball);
-  } else if (useStrongBall) {
-    // Pokemony z listy lapiemy zawsze ultraballem - bez wzgledu na poziom
-    // i trudnosc. Wyjatkiem sa tylko warunki sprawdzane wyzej: Ultra Bestia,
-    // Golden Nest i lokacja specjalna, gdzie ultraballa nie ma na ekranie.
-    log.info(`${pokemon.pokemon} z listy mocnych kul - rzucam ultraballem.`);
-    await ThrowUltraOrPremier(page);
-  } else if (pokemon.level < LureBallMaxLvl && pokemon.catchDiff <= 2 && sharesType(pokemon.types, battleSlot)) {
-      // Lureball ma pierwszenstwo przed pokeballem i friendballem: ponizej 30
-      // poziomu, trudnosc <=2 i typ wspolny z pokemonem wyslanym do walki.
-      log.info(`Wspólny typ z ${battleSlot?.name} — rzucam lureball`);
-      await ClickXBall(page, Pokeballe.lureball );
-  }  else if (pokemon.catchDiff === 1 && pokemon.level < 13) {
-      await ClickXBall(page, Pokeballe.pokeball);
-  } else if (pokemon.catchDiff === 2 && pokemon.level < 30) {
-    await ClickXBall(page, Pokeballe.friendball);
-  } else if (goldenNest) {
+  if (choice.kind === 'goldenNest') {
     // Rzut wykonujemy zawsze; wynik decyduje tylko o powiadomieniu.
-    // W lokacji specjalnej safariball jest jedyna dostepna kula, wiec
-    // oszczedzanie (saveSafariBall) tu nie obowiazuje.
-    const thrown = regionInfo.isSpecial
-      ? await ClickXBall(page, Pokeballe.safariball)
-      : await ClickXBall(page, Pokeballe.cherishball);
+    const thrown = await ClickXBall(page, Pokeballe[choice.ball]);
 
     // Pierwsza wiadomosc: samo spotkanie. Wysylamy ja niezaleznie od tego,
     // czy udalo sie rzucic kula - inaczej przegrana walka z Golden Nestem
     // przeszlaby bez zadnego powiadomienia.
     await notifyGoldenNest({
       region: regionName,
-      location: regionInfo.name,
+      location: regionInfo?.name,
       pokemon: pokemon.pokemon,
       level: pokemon.level,
     });
@@ -253,29 +205,22 @@ async function CatchPokemon(page, pokemon, regionInfo, regionName, battleSlot = 
     // thrown=false to co innego niz nieudany rzut: kuli nie bylo na ekranie,
     // wiec nie ma czego pilnowac - blokada nie ma wtedy sensu.
     return { goldenNest: thrown, caught };
-  } else if (pokemon.catchDiff >= 5 && pokemon.level < UltraBallMaxLvl) {
-    // Ultraball tylko na najtrudniejsze (diff 5) do 70 poziomu. Diff 4
-    // idzie zwyklym lancuchem: ponizej 30 poziomu greatball/nightball,
-    // od 30 - levelball.
-    await ThrowUltraOrPremier(page);
-  } else if (pokemon.catchDiff === 4) {
-    // Diff 4 zawsze levelballem - takze ponizej 30 poziomu, gdzie
-    // lancuch rzucalby greatballem albo nightballem.
-    await ClickXBall(page, Pokeballe.levelball);
-  } else if (pokemon.level >= LvlBallMinLvl) {
-    await ClickXBall(page, Pokeballe.levelball);
-  } else if ((time >= 18 || time < 6) && pokemon.level < NightBallMaxLvl) {
-    await ClickXBall(page, Pokeballe.nightball);
-  } else if (pokemon.level < NestBallMaxLvl && pokemon.catchDiff < 3) {
-    // Diff 3 i wyzej ponizej 20 poziomu pomija nestballa i schodzi
-    // do greatballa (w nocy przechwytuje je wczesniej nightball).
-    await ClickXBall(page, Pokeballe.nestball);
-  } else {
-    await ClickXBall(page, Pokeballe.greatball);
   }
 
+  if (choice.reason === 'lista mocnych kul') {
+    log.info(`${pokemon.pokemon} z listy mocnych kul - rzucam ultraballem.`);
+  } else if (choice.ball === 'lureball') {
+    log.info(`Wspólny typ z ${battleSlot?.name} — rzucam lureball`);
+  }
+
+  if (choice.ball === 'ultraball' && choice.fallback === 'premierball') {
+    await ThrowUltraOrPremier(page);
+  } else {
+    await ClickXBall(page, Pokeballe[choice.ball]);
+  }
   return { goldenNest: false };
 }
+
 
 // Sprawdza, czy rzut kula zakonczyl sie zlapaniem. Gra wypisuje wtedy
 // komunikat "Udało Ci się..." w zielonym alercie; ucieczka lub przegrana

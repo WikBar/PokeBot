@@ -12,9 +12,15 @@ const path = require('path');
 const { runDailyActions, runCareIfNeeded, runAssociationPAIfNeeded, runPABerriesIfNeeded, areAllDailysDone, getDailyRunKey, navigateViaMenu } = require('./dailyActions');
 const { OpenBackpackAndUpdate, PublishSavedEquipment, UseRepel } = require('./actions/equipment');
 const { logger } = require('./utils/logger');
-const { notifyShinyHold, notifyShinyNextLocation, notifyGoldenNest, notifyGoldenNestResult } = require('./utils/notifier');
+const { notifyShinyHold, notifyShinyNextLocation, notifyGoldenNest, notifyGoldenNestResult, sendNotification } = require('./utils/notifier');
+const { acquireLock, releaseLock } = require('./utils/instanceLock');
+const { validateConfig, validateLocations } = require('./validation/config');
 const { startServer } = require('./server');
 const state = require('./state');
+const { isSpecialLocationDay, pickNextLocation } = require('./logic/locations');
+const { createShinyState, maxTriesFrom, shinyStep } = require('./logic/shiny');
+const { targetListFor } = require('./logic/categorize');
+const { decideRepelUse } = require('./logic/repel');
 
 const log = logger.child({ module: 'main' });
 
@@ -28,25 +34,9 @@ const ADVENTURE_TIMEOUT_DEFAULT = 3000;
 const ADVENTURE_TIMEOUT_MIN = 300;
 const REGEN_WAIT_MINUTES = 12;
 const REGEN_ITERATIONS = 10;
-// Tryb szukania Shiny: na kazdej lokacji robimy N wypraw i jesli nie trafimy
-// Golden Nest, przechodzimy do kolejnej. Golden Nest sygnalizuje CatchPokemon
-// (ten sam moment, w ktorym idzie powiadomienie na Telegram).
-const SHINY_HUNT_TRIES_DEFAULT = 20;
-// Golden Nest, ktorego nie udalo sie zlapac: gniazdo dalej jest aktywne,
-// wiec zostajemy na lokacji przez tyle kolejnych wypraw.
-const SHINY_HOLD_ITERATIONS = 100;
-// Co tyle wypraw blokady leci na Telegram raport, ile jeszcze zostalo.
-const SHINY_HOLD_NOTIFY_EVERY = 20;
 // Prog Golden Nest - uzywany tylko przy przegranej walce, gdy CatchPokemon
 // (ktore normalnie rozpoznaje gniazdo) w ogole sie nie wykonuje.
 const GOLDEN_NEST_MIN_LV = 75;
-// Lokacje specjalne sa dostepne tylko w piatek, sobote i niedziele
-// (getDay(): 0 = niedziela, 5 = piatek, 6 = sobota).
-const SPECIAL_LOCATION_DAYS = [0, 5, 6];
-
-function isSpecialLocationDay(date = new Date()) {
-  return SPECIAL_LOCATION_DAYS.includes(date.getDay());
-}
 // Poniżej tego poziomu wybieramy do walki pokemona o wspólnym typie.
 const SAME_TYPE_MAX_LV = 50;
 
@@ -58,9 +48,27 @@ const SAME_TYPE_MAX_LV = 50;
     log.error('Uncaught exception', { error: String(error), stack: error?.stack });
   });
 
+  // Druga instancja na tym samym katalogu = dwa boty na jednym koncie,
+  // ktore nadpisuja sobie config. Konczymy, zanim cokolwiek uruchomimy.
+  const lock = acquireLock();
+  if (!lock.ok) {
+    log.error(`Bot już działa (PID ${lock.pid}) - kończę, żeby nie uruchomić drugiej instancji.`);
+    process.exit(1);
+  }
+  process.on('exit', () => releaseLock());
+
   const locationsPath = path.resolve(__dirname, '..', 'config', 'locations.json');
   const configPath = path.resolve(__dirname, '..', 'config', 'config.json');
+  const teamPath = path.resolve(__dirname, '..', 'config', 'team.json');
   const locations = await loadFromFile(locationsPath);
+  // Bez poprawnych lokacji bot nie ruszy - lepiej zakonczyc od razu niz
+  // krecic petla bledow (pm2 zrestartuje proces).
+  const locationsCheck = validateLocations(locations);
+  if (locationsCheck.errors.length > 0) {
+    log.error('locations.json niepoprawny', { errors: locationsCheck.errors });
+    await sendNotification(`PokeBot: locations.json niepoprawny - bot nie wystartuje.\n- ${locationsCheck.errors.join('\n- ')}`);
+    process.exit(1);
+  }
 
 
   const credentials = {
@@ -86,11 +94,10 @@ const SAME_TYPE_MAX_LV = 50;
   if (!loggedIn) {
     log.error('Logowanie nieudane. Sprawdź dane logowania w pliku .env.');
     await browser.close();
-    return;
+    // Serwer Express trzymalby proces przy zyciu - pm2 nie zrobilby restartu.
+    process.exit(1);
   }
 
-// Domyślne ustawienia auto-Tepela/Repela, gdy brak ich w config.json.
-const AUTO_REPEL_DEFAULT_MIN = 2;
 
 // Aktywuje Tepel/Repel, gdy licznik spadł poniżej progu, albo gdy panel web
 // zlecił użycie konkretnego przedmiotu. Uruchamiane tuż po sprawdzeniu HP,
@@ -98,47 +105,81 @@ const AUTO_REPEL_DEFAULT_MIN = 2;
 async function AutoUseRepelIfNeeded(page, accountConfig) {
   try {
     const { repel, useRepelRequest, equipment } = state.getState();
+    const decision = decideRepelUse({ repel, useRepelRequest, stock: equipment?.repels }, accountConfig);
 
-    // Zlecenie z panelu ma pierwszeństwo przed automatem.
-    if (useRepelRequest) {
-      const { kind, tier } = useRepelRequest;
+    if (decision.source === 'panel') {
       state.setUseRepelRequest(null);   // czyścimy od razu, by nie powtórzyć
-      log.info(`Tepel/Repel: zlecenie z panelu - ${kind} ${tier}.`);
-      await UseRepel(page, kind, tier, navigateViaMenu);
+      log.info(`Tepel/Repel: zlecenie z panelu - ${decision.use.kind} ${decision.use.tier}.`);
+    } else if (decision.skip === 'noStock') {
+      log.warn(`Tepel/Repel: brak ${decision.kind}i w plecaku - pomijam aktywację.`);
       return;
-    }
-
-    if (accountConfig.autoRepelEnabled === false) return;
-
-    const min = Number.isFinite(Number(accountConfig.autoRepelMin))
-      ? Number(accountConfig.autoRepelMin)
-      : AUTO_REPEL_DEFAULT_MIN;
-
-    // Brak licznika = nic nie działa, więc też odnawiamy.
-    const value = repel?.value;
-    if (value !== undefined && value !== null && value >= min) return;
-
-    const kind = accountConfig.autoRepelKind === 'tepel' ? 'tepel' : 'repel';
-    const tier = Number(accountConfig.autoRepelTier) || 1;
-
-    // Wybrany poziom może się skończyć — wtedy bierzemy inny, jaki mamy.
-    const stock = equipment?.repels;
-    let useTier = tier;
-    if (stock && !(stock[`${kind}-${tier}`] > 0)) {
-      const fallback = [1, 2, 3].find(t => stock[`${kind}-${t}`] > 0);
-      if (!fallback) {
-        log.warn(`Tepel/Repel: brak ${kind}i w plecaku - pomijam aktywację.`);
-        return;
+    } else if (decision.skip) {
+      return;
+    } else {
+      if (decision.fallbackFrom) {
+        log.info(`Tepel/Repel: brak poziomu ${decision.fallbackFrom}, używam ${decision.use.tier}.`);
       }
-      log.info(`Tepel/Repel: brak poziomu ${tier}, używam ${fallback}.`);
-      useTier = fallback;
+      log.info(`Tepel/Repel: licznik ${decision.value ?? 'brak'} < ${decision.min} - aktywuję.`);
     }
-
-    log.info(`Tepel/Repel: licznik ${value ?? 'brak'} < ${min} - aktywuję.`);
-    await UseRepel(page, kind, useTier, navigateViaMenu);
+    await UseRepel(page, decision.use.kind, decision.use.tier, navigateViaMenu);
   } catch (e) {
     log.warn('Tepel/Repel: auto-aktywacja nieudana', { error: String(e) });
   }
+}
+
+// Ostatni config, ktory przeszedl walidacje, i klucze juz zgloszonych
+// problemow (zeby nie zasypywac logu i Telegrama co wyprawe).
+let lastGoodConfig = null;
+let reportedConfigErrors = '';
+let reportedConfigWarnings = '';
+// Stan trybu Shiny - patrz logic/shiny.js.
+let shiny = null;
+
+// Wczytuje config.json z walidacja. Zepsuty plik (np. same zera po zaniku
+// pradu) albo bledne wartosci nie zatrzymuja bota: zostaje na ostatnim
+// poprawnym configu, a problem idzie raz do logu i na Telegram.
+// Rzuca wyjatek tylko wtedy, gdy poprawnego configu nie bylo jeszcze nigdy.
+async function loadCheckedConfig() {
+  const cfg = await loadFromFile(configPath);
+  const team = (await loadFromFile(teamPath))?.team || null;
+  const { errors, warnings } = validateConfig(cfg, locations, team);
+
+  if (errors.length > 0) {
+    const key = errors.join('|');
+    if (key !== reportedConfigErrors) {
+      reportedConfigErrors = key;
+      log.error('Config niepoprawny', { errors });
+      await sendNotification(`PokeBot: config.json niepoprawny${lastGoodConfig ? ' - zostaję na poprzednim' : ''}:\n- ${errors.join('\n- ')}`);
+    }
+    if (!lastGoodConfig) {
+      // Bez poprawnego configu nie da sie nic zrobic - czekamy dluzej niz
+      // zwykle 5 s petli glownej, zeby nie mielic logu.
+      await new Promise((resolve) => setTimeout(resolve, 60 * 1000));
+      throw new Error(`Brak poprawnego config.json: ${errors[0]}`);
+    }
+    return { ...lastGoodConfig };
+  }
+
+  if (reportedConfigErrors) {
+    log.info('Config znów poprawny.');
+    reportedConfigErrors = '';
+  }
+  const warnKey = warnings.join('|');
+  if (warnings.length > 0 && warnKey !== reportedConfigWarnings) {
+    log.warn('Ostrzeżenia configu', { warnings });
+  }
+  reportedConfigWarnings = warnKey;
+
+  if (process.env.POKE_ADVENTURE_NR) {
+    const parsedAdventureNr = parseInt(process.env.POKE_ADVENTURE_NR, 10);
+    if (!Number.isNaN(parsedAdventureNr)) {
+      cfg.adventureNr = parsedAdventureNr;
+    } else {
+      log.warn("Niepoprawna wartość POKE_ADVENTURE_NR, używam wartości z config.json");
+    }
+  }
+  lastGoodConfig = cfg;
+  return { ...cfg };
 }
 
 // Dokleja pokemona do listy w config.json bez nadpisywania zmian z panelu web.
@@ -162,89 +203,48 @@ async function appendToConfigList(configPath, accountConfig, listKey, pokemon) {
   return true;
 }
 
-// Tryb Shiny: przechodzi na kolejna nie-specjalna lokacje w regionie.
+// Przechodzi na kolejna nie-specjalna lokacje w regionie (tryb Shiny
+// i randomAdventure - wybor w logic/locations.js).
 // Zapisujemy na swiezej kopii z dysku, zeby nie nadpisac zmian z panelu web.
-// Zwraca nowy numer wyprawy albo null, gdy zmiana sie nie powiodla.
+// Zwraca { nr, name } albo null, gdy zmiana sie nie powiodla.
 async function advanceToNextLocation(region, accountConfig, configPath, reason, options = {}) {
-  // Numery wypraw pominietych w panelu web. Ignorujemy wartosci spoza
-  // regionu, zeby ustawienie z innego regionu nie blokowalo rotacji.
-  const skipped = new Set(
-    (Array.isArray(accountConfig.skippedAdventures) ? accountConfig.skippedAdventures : [])
-      .map(Number)
-      .filter(Number.isFinite)
-  );
-
-  const allNonSpecial = Object.entries(region)
-    .filter(([, loc]) => !loc.isSpecial)
-    .sort(([a], [b]) => Number(a) - Number(b));
-  if (allNonSpecial.length === 0) {
-    log.warn('Shiny: brak nie-specjalnych lokacji w regionie - zostaje na miejscu.');
+  const label = options.label || 'Shiny';
+  const next = pickNextLocation(region, accountConfig.adventureNr, accountConfig.skippedAdventures, options);
+  if (!next) {
+    log.warn(`${label}: brak nie-specjalnych lokacji w regionie - zostaje na miejscu.`);
     return null;
   }
-
-  let nonSpecial = allNonSpecial.filter(([key]) => !skipped.has(Number(key)));
-  // Gdyby pominieto wszystkie - ignorujemy filtr, inaczej bot nie mialby
-  // dokad isc i utknalby na jednej lokacji.
-  if (nonSpecial.length === 0) {
-    log.warn('Shiny: pominięto wszystkie lokacje w regionie - ignoruję listę pominiętych.');
-    nonSpecial = allNonSpecial;
+  if (next.ignoredSkipped) {
+    log.warn(`${label}: pominięto wszystkie lokacje w regionie - ignoruję listę pominiętych.`);
   }
-
-  // fromStart: wracamy na pierwsza lokacje zamiast isc o jedna dalej.
-  // Uzywane, gdy bot stoi na lokacji specjalnej w dzien, w ktorym jest
-  // ona niedostepna - wtedy "kolejna" nie ma sensu.
-  // Gdy biezaca lokacja jest pominieta lub specjalna, findIndex zwraca -1
-  // i trafiamy na pierwsza dostepna - to zachowanie jest poprawne.
-  const nextIdx = options.fromStart
-    ? 0
-    : (nonSpecial.findIndex(([key]) => Number(key) === accountConfig.adventureNr) + 1) % nonSpecial.length;
-  const nextNr = Number(nonSpecial[nextIdx][0]);
 
   const fresh = await loadFromFile(configPath);
   if (fresh) {
-    fresh.adventureNr = nextNr;
+    fresh.adventureNr = next.nr;
     await saveToFile(configPath, fresh);
   } else {
-    log.warn('Shiny: nie udało się wczytać config.json - zmieniam tylko w pamięci.');
+    log.warn(`${label}: nie udało się wczytać config.json - zmieniam tylko w pamięci.`);
   }
 
-  accountConfig.adventureNr = nextNr;
+  accountConfig.adventureNr = next.nr;
   accountConfig.adventureChanged = true;   // wymusza klikniecie nowej lokacji
-  const nextName = nonSpecial[nextIdx][1].name;
-  log.info(`Shiny: ${reason} → lokacja ${nextNr} (${nextName})`);
-  return { nr: nextNr, name: nextName };
+  log.info(`${label}: ${reason} → lokacja ${next.nr} (${next.name})`);
+  return { nr: next.nr, name: next.name };
 }
 
 async function categorizePokemon(pokemonInfo, accountConfig, configPath) {
-  if (!pokemonInfo.pokemon) return;
   const diff = pokemonInfo.catchDiff;
-
-  const diffListMap = {
-    0: 'diff0CatchPokemons',
-    3: 'diff3CatchPokemons',
-    4: 'diff4CatchPokemons',
-    5: 'diff5CatchPokemons',
-  };
-
-  if (diff !== 0 && diff <= 2) {
+  const target = targetListFor(diff, pokemonInfo.pokemon, accountConfig.protectedPokemon);
+  if (target.skip === 'protected') {
     // Pokemony chronione nigdy nie trafiają na listę do sprzedaży.
-    const protectedList = Array.isArray(accountConfig.protectedPokemon) ? accountConfig.protectedPokemon : [];
-    if (protectedList.includes(pokemonInfo.pokemon)) {
-      log.info(`Pominięto dodanie do sellablePokemon – pokemon chroniony: ${pokemonInfo.pokemon}`);
-      return;
-    }
-    if (!Array.isArray(accountConfig.sellablePokemon)) accountConfig.sellablePokemon = [];
-    const added = await appendToConfigList(configPath, accountConfig, 'sellablePokemon', pokemonInfo.pokemon);
-    if (added) log.info(`Dodano do sellablePokemon (trudność ${diff}): ${pokemonInfo.pokemon}`);
+    log.info(`Pominięto dodanie do sellablePokemon – pokemon chroniony: ${pokemonInfo.pokemon}`);
     return;
   }
+  if (!target.listKey) return;
 
-  const listKey = diffListMap[diff];
-  if (!listKey) return;
-
-  if (!Array.isArray(accountConfig[listKey])) accountConfig[listKey] = [];
-  const added = await appendToConfigList(configPath, accountConfig, listKey, pokemonInfo.pokemon);
-  if (added) log.info(`Dodano do ${listKey} (trudność ${diff}): ${pokemonInfo.pokemon}`);
+  if (!Array.isArray(accountConfig[target.listKey])) accountConfig[target.listKey] = [];
+  const added = await appendToConfigList(configPath, accountConfig, target.listKey, pokemonInfo.pokemon);
+  if (added) log.info(`Dodano do ${target.listKey} (trudność ${diff}): ${pokemonInfo.pokemon}`);
 }
 
 while (true){
@@ -274,15 +274,7 @@ while (true){
   const teamResult = await UpdateTeamIfDue(page, { force: forceTeam });
   if (forceTeam) state.setForceTeamUpdate(false);
   if (teamResult?.team) state.setTeamLastUpdated(new Date().toISOString());
-  let accountConfig = await loadFromFile(configPath);
-  if (process.env.POKE_ADVENTURE_NR) {
-    const parsedAdventureNr = parseInt(process.env.POKE_ADVENTURE_NR, 10);
-    if (!Number.isNaN(parsedAdventureNr)) {
-      accountConfig.adventureNr = parsedAdventureNr;
-    } else {
-      log.warn("Niepoprawna wartość POKE_ADVENTURE_NR, używam wartości z config.json");
-    }
-  }
+  let accountConfig = await loadCheckedConfig();
   state.updateStats({ region: accountConfig.region, adventureNr: accountConfig.adventureNr });
   log.info(`Załadowana konfiguracja: Region ${accountConfig.region}, Atakujący pokemon ${accountConfig.pokemonIndex + 1}, Numer przygody ${accountConfig.adventureNr}`);
   const region=locations[accountConfig.region];
@@ -312,15 +304,12 @@ while (true){
 
   paResult = await CheckPA(page);
   state.updateStats({ pa: { current: paResult.currentPA, max: paResult.maxPA } });
-  // Tryb Shiny: licznik wypraw na biezacej lokacji. Zerowany przy kazdej
-  // zmianie lokacji, zeby nowa dostala pelna pule prob.
-  let shinyTries = 0;
-  let shinyLocationNr = accountConfig.adventureNr;
+  // Stan trybu Shiny (proby, blokada Golden Nest) zyje poza petla glowna -
+  // wczesniej zerowal sie po kazdym odnowieniu PA i blokada przepadala.
+  if (!shiny) shiny = createShinyState(accountConfig.adventureNr);
   // Przezywa przeladowanie configu z dysku - inaczej flaga adventureChanged
   // ginie i bot klika "Kontynuuj" zamiast wejsc na nowa lokacje.
   let shinyLocationChanged = false;
-  // Ile jeszcze wypraw zostajemy na lokacji po nieudanym Golden Nest.
-  let shinyHold = 0;
 
   // Lokacja specjalna poza piatkiem/sobota/niedziela jest niedostepna -
   // wracamy na pierwsza lokacje, zanim bot sprobuje tam wyruszyc.
@@ -331,7 +320,7 @@ while (true){
       { fromStart: true });
     if (reset !== null) {
       locationInfo = region[String(reset.nr)] || locationInfo;
-      shinyLocationNr = reset.nr;
+      shiny = createShinyState(reset.nr);
       shinyLocationChanged = true;
       state.updateStats({ adventureNr: reset.nr });
     }
@@ -432,9 +421,13 @@ while (true){
           const catchResult = await CatchPokemon(page,pokemonInfo,locationInfo,accountConfig.region,battleSlot,
             { saveSafariBall: accountConfig.saveSafariBall, goldenNest: isGoldenNest,
               strongBallPokemons: accountConfig.strongBallPokemons });
-          if (isGoldenNest) {
+          // goldenNest=false przy potwierdzonym gniezdzie = kuli nie bylo na
+          // ekranie, wiec nie bylo rzutu i nie ma czego pilnowac blokada.
+          if (isGoldenNest && catchResult?.goldenNest) {
             goldenNestFound = true;
-            goldenNestCaught = !!catchResult?.caught;
+            goldenNestCaught = !!catchResult.caught;
+          } else if (isGoldenNest) {
+            log.warn('Golden Nest: brak rzutu (nie było kuli) - nie blokuję lokacji.');
           }
           state.updateStats({ lastEvent: 'pokemon_caught' });
           }
@@ -467,64 +460,51 @@ while (true){
       // powyzej 75 poziomu) zeruje licznik - zostajemy i szukamy dalej.
       // Po wyczerpaniu prob idziemy na kolejna lokacje.
       if (accountConfig.shinyHunt) {
-        // Zmiana lokacji z panelu w trakcie polowania = nowa pula prob.
-        // Blokade tez kasujemy - dotyczyla poprzedniej lokacji.
-        if (accountConfig.adventureNr !== shinyLocationNr) {
-          shinyLocationNr = accountConfig.adventureNr;
-          shinyTries = 0;
-          shinyHold = 0;
-        }
+        // Decyzja w logic/shiny.js, tutaj tylko wykonanie akcji.
+        const maxTries = maxTriesFrom(accountConfig);
+        const step = shinyStep(shiny, {
+          adventureNr: accountConfig.adventureNr,
+          goldenNestFound,
+          goldenNestCaught,
+          maxTries,
+        });
+        shiny = step.state;
+        const action = step.action;
 
-        const maxTries = Math.max(1, Number(accountConfig.shinyHuntTries) || SHINY_HUNT_TRIES_DEFAULT);
-
-        if (goldenNestFound && goldenNestCaught) {
-          // Zlapany - gniazdo wykorzystane, idziemy na kolejna lokacje.
+        if (action.type === 'advance' && action.reason === 'caught') {
           log.info(`Shiny: Golden Nest (${pokemonInfo.pokemon}, poziom ${pokemonInfo.level}) złapany na lokacji ${accountConfig.adventureNr}.`);
           const next = await advanceToNextLocation(
             region, accountConfig, configPath, 'Golden Nest złapany');
           if (next !== null) {
-            shinyLocationNr = next.nr;
+            shiny.locationNr = next.nr;
             shinyLocationChanged = true;
             await notifyShinyNextLocation({
               pokemon: pokemonInfo.pokemon,
               nextLocation: next.name,
             });
           }
-          shinyTries = 0;
-          shinyHold = 0;
-        } else if (goldenNestFound) {
-          // Nieudany rzut - gniazdo dalej aktywne, wiec blokujemy zmiane
-          // lokacji na kolejne SHINY_HOLD_ITERATIONS wypraw.
-          shinyTries = 0;
-          shinyHold = SHINY_HOLD_ITERATIONS;
-          log.info(`Shiny: Golden Nest (${pokemonInfo.pokemon}, poziom ${pokemonInfo.level}) NIE złapany - zostaję na lokacji ${accountConfig.adventureNr} na ${shinyHold} wypraw.`);
-        } else if (shinyHold > 0) {
-          shinyHold--;
-          log.info(`Shiny: blokada po Golden Nest - zostaję na lokacji ${accountConfig.adventureNr} jeszcze ${shinyHold} wypraw.`);
-          // Raport na Telegram co SHINY_HOLD_NOTIFY_EVERY wypraw blokady.
-          // Wysylamy tez przy zerze, zeby bylo wiadomo, ze blokada minela.
-          if (shinyHold > 0 && shinyHold % SHINY_HOLD_NOTIFY_EVERY === 0) {
+        } else if (action.type === 'holdStart') {
+          log.info(`Shiny: Golden Nest (${pokemonInfo.pokemon}, poziom ${pokemonInfo.level}) NIE złapany - zostaję na lokacji ${accountConfig.adventureNr} na ${shiny.hold} wypraw.`);
+        } else if (action.type === 'hold') {
+          log.info(`Shiny: blokada po Golden Nest - zostaję na lokacji ${accountConfig.adventureNr} jeszcze ${shiny.hold} wypraw.`);
+          if (action.notify) {
             await notifyShinyHold({
               location: locationInfo?.name,
-              remaining: shinyHold,
+              remaining: shiny.hold,
             });
           }
         } else {
-          shinyTries++;
-          log.info(`Shiny: próba ${shinyTries}/${maxTries} na lokacji ${accountConfig.adventureNr} - brak Golden Nest.`);
-          if (shinyTries >= maxTries) {
+          log.info(`Shiny: próba ${action.tries}/${maxTries} na lokacji ${accountConfig.adventureNr} - brak Golden Nest.`);
+          if (action.type === 'advance') {
             const next = await advanceToNextLocation(
               region, accountConfig, configPath, `${maxTries} wypraw bez Golden Nest`);
             if (next !== null) {
-              shinyLocationNr = next.nr;
-              shinyTries = 0;
+              shiny.locationNr = next.nr;
               shinyLocationChanged = true;
-            } else {
-              shinyTries = 0;   // brak dokad isc - zaczynamy pule od nowa
             }
           }
         }
-        state.updateStats({ shiny: { tries: shinyTries, maxTries, hold: shinyHold, location: accountConfig.adventureNr } });
+        state.updateStats({ shiny: { tries: shiny.tries, maxTries, hold: shiny.hold, location: accountConfig.adventureNr } });
       }
 
       // Wartosc czytana z configu przy kazdej iteracji, wiec zmiana
@@ -561,11 +541,7 @@ while (true){
       }
 
       const prevAdventureNr = accountConfig.adventureNr;
-      accountConfig = await loadFromFile(configPath);
-      if (process.env.POKE_ADVENTURE_NR) {
-        const parsedAdventureNr = parseInt(process.env.POKE_ADVENTURE_NR, 10);
-        if (!Number.isNaN(parsedAdventureNr)) accountConfig.adventureNr = parsedAdventureNr;
-      }
+      accountConfig = await loadCheckedConfig();
       // Tryb Shiny zmienil lokacje i zapisal ja na dysk, wiec porownanie
       // ponizej jej nie wykryje (prev == nowa). Flage trzeba przeniesc
       // recznie - przeladowanie configu skasowalo ta z pamieci.
@@ -595,23 +571,11 @@ while (true){
     }
     // Tryb Shiny sam przelacza lokacje po wyczerpaniu prob, wiec rotacja
     // randomAdventure musi ustapic - inaczej zmiana nastapilaby dwa razy.
+    // Wspolna funkcja z trybem Shiny, wiec respektuje tez skippedAdventures.
     if (accountConfig.randomAdventure && !accountConfig.shinyHunt) {
-      const nonSpecial = Object.entries(region)
-        .filter(([, loc]) => !loc.isSpecial)
-        .sort(([a], [b]) => Number(a) - Number(b));
-      const currentIdx = nonSpecial.findIndex(([key]) => Number(key) === accountConfig.adventureNr);
-      const nextIdx = (currentIdx + 1) % nonSpecial.length;
-      accountConfig.adventureNr = Number(nonSpecial[nextIdx][0]);
-      // Zapisz TYLKO adventureNr na świeżej kopii z dysku, by nie nadpisać
-      // zmian list zrobionych w panelu web.
-      const fresh = await loadFromFile(configPath);
-      if (fresh) {
-        fresh.adventureNr = accountConfig.adventureNr;
-        await saveToFile(configPath, fresh);
-      } else {
-        await saveToFile(configPath, accountConfig);
-      }
-      log.info(`randomAdventure: następna lokacja → ${accountConfig.adventureNr} (${nonSpecial[nextIdx][1].name})`);
+      const next = await advanceToNextLocation(
+        region, accountConfig, configPath, 'następna lokacja', { label: 'randomAdventure' });
+      if (next) locationInfo = region[String(next.nr)] || locationInfo;
     }
 
     const activityCheck = await CheckActivity(page);
@@ -683,8 +647,12 @@ while (true){
     await page.waitForTimeout(5000); // Wait before retrying
   }
 }
-})().catch((error) => {
+})().catch(async (error) => {
   log.error('Fatal error', { error: String(error), stack: error?.stack });
+  // Serwer Express trzyma proces przy zyciu, wiec bez exit pm2 nigdy nie
+  // zrestartowalby bota (01.10 bot stal tak 3,5 h). Kod 1 = restart przez pm2.
+  await sendNotification(`PokeBot: błąd krytyczny, restartuję proces. ${String(error).slice(0, 200)}`);
+  process.exit(1);
 });
 
 // 6. (Opcjonalnie) robimy zrzut ekranu po zalogowaniu

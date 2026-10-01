@@ -6,6 +6,7 @@ const state = require('./state');
 const { logger } = require('./utils/logger');
 const { setForceHospital } = require('./state');
 const { REPEL_ITEM_NAMES } = require('./actions/equipment');
+const { validateConfig } = require('./validation/config');
 
 const log = logger.child({ module: 'server' });
 
@@ -16,7 +17,7 @@ const LOCATIONS_PATH = path.resolve(__dirname, '..', 'config', 'locations.json')
 
 const ALLOWED_CONFIG_KEYS = new Set([
   'region', 'adventureNr', 'randomAdventure',
-  'pokemonIndex', 'SecondPokemonIndex', 'paBuffer', 'sellablePokemon', 'protectedPokemon',
+  'pokemonIndex', 'SecondPokemonIndex', 'secondPokMaxLv', 'paBuffer', 'sellablePokemon', 'protectedPokemon',
   'sellThreshold', 'limitsEnabled', 'diff3Keep', 'diff4Keep',
   'autoRepelEnabled', 'autoRepelKind', 'autoRepelTier', 'autoRepelMin',
   'saveSafariBall', 'activityMode', 'adventureDelay',
@@ -53,15 +54,30 @@ function startServer() {
 
   app.post('/api/config', async (req, res) => {
     const patch = req.body;
+    if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+      return res.status(400).json({ ok: false, error: 'Body must be a JSON object' });
+    }
     const unknownKeys = Object.keys(patch).filter(k => !ALLOWED_CONFIG_KEYS.has(k));
     if (unknownKeys.length > 0) {
       return res.status(400).json({ ok: false, error: `Unknown config keys: ${unknownKeys.join(', ')}` });
     }
     const current = await loadFromFile(CONFIG_PATH);
+    // Bez obecnego configu zapisalibysmy sam patch - czyli skasowali
+    // wszystkie pozostale ustawienia i listy.
+    if (!current) {
+      return res.status(500).json({ ok: false, error: 'config.json nie da się wczytać - zapis wstrzymany' });
+    }
     const updated = { ...current, ...patch };
+    const locations = await loadFromFile(LOCATIONS_PATH);
+    const team = (await loadFromFile(TEAM_PATH))?.team || null;
+    const { errors, warnings } = validateConfig(updated, locations, team);
+    if (errors.length > 0) {
+      log.warn('Config z panelu odrzucony', { errors });
+      return res.status(400).json({ ok: false, error: errors.join('; '), errors, warnings });
+    }
     await saveToFile(CONFIG_PATH, updated);
     log.info('Config updated via API', { patch });
-    res.json({ ok: true, config: updated });
+    res.json({ ok: true, config: updated, warnings });
   });
 
   // Lista regionów dla panelu web — zawsze zgodna z locations.json.

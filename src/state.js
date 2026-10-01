@@ -16,6 +16,12 @@ const _state = {
   adventureNr:   null,
   lastEvent:     null,
   lastUpdated:   null,
+  shiny:         null,          // { tries, maxTries, hold, location } w trybie Shiny
+  // Do health-checku: kiedy bot ostatnio cokolwiek zalogowal (takze podczas
+  // 2-godzinnego odnawiania PA loguje co 12 min) i ktory to proces.
+  lastLogAt:     null,
+  startedAt:     new Date().toISOString(),
+  pid:           process.pid,
   recentLogs:    []
 };
 
@@ -41,6 +47,7 @@ function updateStats(partial) {
 
 function addLog(entry) {
   _state.recentLogs.push(entry);
+  _state.lastLogAt = entry?.ts || new Date().toISOString();
   if (_state.recentLogs.length > 100) _state.recentLogs.shift();
   _notifySseClients();
 }

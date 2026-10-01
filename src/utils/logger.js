@@ -42,14 +42,26 @@ function pruneOldLogs(logsDir, maxAgeDays = 3) {
   }
 }
 
+// Data lokalna (YYYY-MM-DD). Wczesniej toISOString() dawal date UTC, wiec
+// plik z danego dnia zawieral linie od 02:00 do 02:00 nastepnego dnia.
+function localDateKey(now = new Date()) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
+// LOG_TO_FILE=false wylacza zapis do logs/ (testy, skrypty weryfikujace).
+function fileLoggingEnabled() {
+  return String(process.env.LOG_TO_FILE || '').toLowerCase() !== 'false';
+}
+
 function getLogFilePath(now = new Date(), accountId) {
-  const dateKey = now.toISOString().slice(0, 10);
+  const dateKey = localDateKey(now);
   const suffix = accountId ? `-${accountId}` : '';
   return path.resolve(__dirname, '..', '..', 'logs', `app-${dateKey}${suffix}.log`);
 }
 
 function getMetricsFilePath(now = new Date()) {
-  const dateKey = now.toISOString().slice(0, 10);
+  const dateKey = localDateKey(now);
   return path.resolve(__dirname, '..', '..', 'logs', `metrics-${dateKey}.jsonl`);
 }
 
@@ -91,13 +103,15 @@ function createLogger(options = {}) {
     else if (level === 'warn') console.warn(line);
     else console.log(line);
 
-    try {
-      const logsDir = path.resolve(__dirname, '..', '..', 'logs');
-      ensureDir(logsDir);
-      fs.appendFileSync(getLogFilePath(new Date(), baseMeta.account), line + '\n', 'utf8');
-      if (Math.random() < 0.01) pruneOldLogs(logsDir);
-    } catch (e) {
-      console.error(formatLine('error', 'Logger file write failed', { error: String(e) }));
+    if (fileLoggingEnabled()) {
+      try {
+        const logsDir = path.resolve(__dirname, '..', '..', 'logs');
+        ensureDir(logsDir);
+        fs.appendFileSync(getLogFilePath(new Date(), baseMeta.account), line + '\n', 'utf8');
+        if (Math.random() < 0.01) pruneOldLogs(logsDir);
+      } catch (e) {
+        console.error(formatLine('error', 'Logger file write failed', { error: String(e) }));
+      }
     }
 
     try {
@@ -107,6 +121,7 @@ function createLogger(options = {}) {
   }
 
   function metric(name, value, meta) {
+    if (!fileLoggingEnabled()) return;
     try {
       const logsDir = path.resolve(__dirname, '..', '..', 'logs');
       ensureDir(logsDir);
@@ -141,5 +156,8 @@ const logger = createLogger();
 module.exports = {
   logger,
   createLogger,
-  getRecentLogs
+  getRecentLogs,
+  formatLine,
+  getLogFilePath,
+  localDateKey,
 };

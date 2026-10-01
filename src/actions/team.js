@@ -172,10 +172,25 @@ async function loadTeam() {
   return (await loadFromFile(TEAM_PATH))?.team || [];
 }
 
+// Gra wypisuje cześć typów inaczej niż TYPE_PL / types.json panelu
+// (np. "Smoczy" zamiast "Smok") - bez tego wspólny typ dla smoków, robaków,
+// kamieni i duchów nigdy się nie zgadzał.
+const TYPE_ALIASES = {
+  Robaczy: 'Robak',
+  Kamienny: 'Skalny',
+  Duch: 'Duchowy',
+  Smoczy: 'Smok',
+};
+
+function normalizeType(type) {
+  const t = String(type || '').trim();
+  return TYPE_ALIASES[t] || t;
+}
+
 // Zwraca true, jeśli pokemon dzieli choć jeden typ z podanym slotem drużyny.
 function sharesType(pokemonTypes, slot) {
-  const types = (Array.isArray(pokemonTypes) ? pokemonTypes : []).filter(Boolean);
-  const slotTypes = [slot?.type1, slot?.type2].filter(Boolean);
+  const types = (Array.isArray(pokemonTypes) ? pokemonTypes : []).map(normalizeType).filter(Boolean);
+  const slotTypes = [slot?.type1, slot?.type2].map(normalizeType).filter(Boolean);
   return types.some((t) => slotTypes.includes(t));
 }
 
@@ -202,6 +217,9 @@ function findMatchingTeamIndex(team, pokemonTypes) {
 
 module.exports = {
   UpdateTeam,
+  TYPE_PL,
+  TYPE_ALIASES,
+  normalizeType,
   UpdateTeamIfDue,
   readTeamFromPage,
   loadTeam,

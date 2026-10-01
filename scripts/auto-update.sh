@@ -52,15 +52,30 @@ log "Nowa wersja: ${LOCAL:0:7} -> ${REMOTE:0:7}"
 [ -f .env ] && cp .env "$ENV_BACKUP"
 
 # Lokalne zmiany plikow roboczych (config/*.json) blokowalyby merge.
+STASHED=0
 if ! git diff --quiet || ! git diff --cached --quiet; then
   log "Wykryto lokalne zmiany - chowam je (git stash)."
-  git stash push --quiet --include-untracked --message "auto-update $(date -Iseconds)"
+  git stash push --quiet --include-untracked --message "auto-update $(date -Iseconds)" && STASHED=1
 fi
 
 if ! git merge --ff-only "origin/$BRANCH" --quiet; then
   log "BLAD: nie udalo sie scalic zmian (wymagana reczna interwencja)."
   [ -f "$ENV_BACKUP" ] && cp "$ENV_BACKUP" .env
   exit 1
+fi
+
+# Weryfikacja configu nowej wersji (tylko projekt bota - panel nie ma
+# skryptu). Przy bledach wracamy do poprzedniej wersji i lokalnych zmian,
+# a dzialajacego procesu nie restartujemy.
+if [ -f scripts/verify-config.js ]; then
+  if ! VERIFY_OUT="$(node scripts/verify-config.js 2>&1)"; then
+    log "BLAD: nowa wersja ma niepoprawny config - wycofuje do ${LOCAL:0:7}."
+    echo "$VERIFY_OUT"
+    git reset --hard "$LOCAL" --quiet
+    [ "$STASHED" = 1 ] && git stash pop --quiet
+    [ -f "$ENV_BACKUP" ] && cp "$ENV_BACKUP" .env
+    exit 1
+  fi
 fi
 
 # Przywracamy .env, gdyby merge go ruszyl.

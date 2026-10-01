@@ -4,3 +4,4 @@ node_modules/
 .env.production
 config/daily-state.json
 config/team.json
+config/*.tmp

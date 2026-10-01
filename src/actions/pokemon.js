@@ -1,5 +1,6 @@
 const { SELL_THRESHOLD, MAX_SELL_CLICK, CLICK_DELAY } = require('./constants');
 const { logger } = require('../utils/logger');
+const { planSale } = require('../logic/sell');
 
 const log = logger.child({ module: 'pokemon' });
 
@@ -69,94 +70,35 @@ async function SellPokemon(page, pokemonToSell, diff3Pokemons = [], protectedPok
   const total = await buttons.count();
   if (total === 0) return;
 
-  const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
   const texts = await buttons.allInnerTexts();
 
+  // Wybor jest w logic/sell.js (testowalny bez przegladarki).
+  const plan = planSale(texts, {
+    sellable: pokemonToSell,
+    protectedList,
+    diff3: diff3Pokemons,
+    diff4: diff4Pokemons,
+    diff3Keep,
+    diff4Keep,
+    limitsEnabled,
+  });
+
   // TOP 5 najliczniejszych pokemonów w zbiorze (na podstawie tekstów w hodowli)
-  const extractName = (raw) => {
-    const firstLine = String(raw || '').split('\n')[0].trim();
-    const cleaned = firstLine
-      .replace(/\s{2,}/g, ' ')
-      .replace(/♀|♂/g, '')
-      .replace(/[+>]/g, '')
-      .replace(/\d+\s*poz\b/gi, '')
-      .replace(/\b(poziom|lvl|lv)\s*\d+\b/gi, '')
-      .replace(/\b\d+\b/g, '')
-      .replace(/\(.*\)$/g, '')
-      .trim();
-    return cleaned.length ? cleaned : firstLine;
-  };
-
-  const counts = new Map();
-  for (const t of texts) {
-    const name = extractName(t);
-    counts.set(name, (counts.get(name) || 0) + 1);
-  }
-
-  const top5 = [...counts.entries()]
+  const top5 = [...plan.counts.entries()]
     .sort((a, b) => b[1] - a[1])
     .slice(0, 5)
     .map(([name, count]) => ({ name, count }));
-
   log.info(`TOP 5 najliczniejszych pokemonów w zbiorze: ${top5.map(t => `${t.name} (${t.count})`).join(', ')}`);
 
-  const matchedIndexes = [];
-  const seenTypes = new Set();
-
-  // true, jeśli tekst przycisku pasuje do któregokolwiek chronionego pokemona
-  const isProtected = (text) =>
-    protectedList.some(name => new RegExp(escapeRegExp(name)).test(text));
-
-  for (let i = 0; i < texts.length; i++) {
-    if (isProtected(texts[i])) continue;
-    const matchedName = pokemonToSell.find(name => new RegExp(escapeRegExp(name)).test(texts[i]));
-    if (matchedName) {
-      if (seenTypes.has(matchedName)) {
-        matchedIndexes.push(i);
-      } else {
-        seenTypes.add(matchedName);
-      }
-    }
+  for (const s of plan.surplus) {
+    log.info(`${s.label}: ${s.name} ma ${s.count} sztuk – sprzedaję ${s.sold} nadwyżek`);
   }
-
-  // Pokemony diff3/diff4: sprzedajemy nadwyżki powyżej ustalonego limitu sztuk.
-  // Indeksy juz zakwalifikowane pomijamy, zeby nie klikac dwa razy w ten sam wpis.
-  const limitSurplus = (list, keep, label) => {
-    const names = Array.isArray(list) ? list : [];
-    if (names.length === 0) return;
-
-    const counts = new Map();
-    for (let i = 0; i < texts.length; i++) {
-      if (isProtected(texts[i]) || matchedIndexes.includes(i)) continue;
-      const matchedName = names.find(name => new RegExp(escapeRegExp(name)).test(texts[i]));
-      if (matchedName) {
-        const current = counts.get(matchedName) || { count: 0, indexes: [] };
-        current.count++;
-        current.indexes.push(i);
-        counts.set(matchedName, current);
-      }
-    }
-
-    for (const [name, { count, indexes }] of counts) {
-      if (count > keep) {
-        const toSell = indexes.slice(keep);
-        log.info(`${label}: ${name} ma ${count} sztuk – sprzedaję ${toSell.length} nadwyżek`);
-        for (const idx of toSell) {
-          matchedIndexes.push(idx);
-        }
-      }
-    }
-  };
-
-  if (limitsEnabled) {
-    limitSurplus(diff3Pokemons, diff3Keep, 'diff3');
-    limitSurplus(diff4Pokemons, diff4Keep, 'diff4');
-  } else {
+  if (!limitsEnabled) {
     log.info('Limity diff3/diff4 wyłączone – sprzedaję tylko z listy sellable.');
   }
 
-  log.info(`Zachowuję po jednym: ${[...seenTypes].join(', ')}`);
+  const matchedIndexes = plan.indexes;
+  log.info(`Zachowuję po jednym: ${plan.keptOne.join(', ')}`);
   log.info(`Dopasowane do sprzedaży ${matchedIndexes.length} pokemonów`);
 
   if (matchedIndexes.length > sellThreshold) {
