@@ -576,14 +576,16 @@ while (true){
       if (accountConfig.adventureNr !== prevAdventureNr) {
         log.info(`Zmiana wyprawy: ${prevAdventureNr} → ${accountConfig.adventureNr} - flaga adventureChanged ustawiona.`);
         accountConfig.adventureChanged = true;
-        // Nowa lokacja moze miec inne requiredPA - bez odswiezenia warunek
-        // petli i kolejne wyprawy liczylyby koszt starej lokacji.
-        const nextLocation = region[String(accountConfig.adventureNr)];
-        if (nextLocation) {
-          locationInfo = nextLocation;
-        } else {
-          log.warn(`Brak lokacji ${accountConfig.adventureNr} w regionie - zostawiam poprzednią.`);
-        }
+      }
+      // locationInfo odswiezamy zawsze, nie tylko przy wykrytej zmianie:
+      // tryb Shiny zmienia adventureNr w pamieci przed przeladowaniem, wiec
+      // prev == nowa i stara lokacja zostawala (zla nazwa w powiadomieniach,
+      // zle requiredPA i isSpecial przy wyborze kuli).
+      const currentLocation = region[String(accountConfig.adventureNr)];
+      if (currentLocation) {
+        locationInfo = currentLocation;
+      } else {
+        log.warn(`Brak lokacji ${accountConfig.adventureNr} w regionie - zostawiam poprzednią.`);
       }
       state.updateStats({ region: accountConfig.region, adventureNr: accountConfig.adventureNr });
 

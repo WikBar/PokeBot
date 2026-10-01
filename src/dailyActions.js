@@ -69,7 +69,16 @@ function loadDailyState() {
 }
 
 function saveDailyState(state) {
-  fs.writeFileSync(DAILY_STATE_PATH, JSON.stringify(state, null, 2), 'utf8');
+  // Zapis atomowy (tmp + fsync + rename), jak w utils/fileOperations
+  const tmpPath = `${DAILY_STATE_PATH}.tmp`;
+  const fd = fs.openSync(tmpPath, 'w');
+  try {
+    fs.writeFileSync(fd, JSON.stringify(state, null, 2), 'utf8');
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  fs.renameSync(tmpPath, DAILY_STATE_PATH);
 }
 
 // Ile razy probowac akcji, ktorej nie udalo sie potwierdzic w statystykach,
