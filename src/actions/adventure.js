@@ -4,6 +4,7 @@ const { logger } = require('../utils/logger');
 const { notifyGoldenNest, notifyGoldenNestResult } = require('../utils/notifier');
 const { sharesType } = require('./team');
 const { chooseBall } = require('../logic/balls');
+const { reportMissingBall } = require('../utils/ballAlerts');
 
 const log = logger.child({ module: 'adventure' });
 
@@ -249,6 +250,11 @@ async function ClickXBall(page, pokeball) {
       log.info(`Kliknięto w ${label}`);
         clicked = true;
     }
+  }
+  // Ekran lapania jest (sa inne kule), a tej jednej brak = skonczyla sie
+  // w plecaku. Bez zadnych kul to nie ekran lapania - nie alarmujemy.
+  if (!clicked && buttons.length > 0) {
+    await reportMissingBall(pokeball);
   }
   return clicked;
 }

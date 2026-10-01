@@ -22,7 +22,8 @@ const { createShinyState, maxTriesFrom, shinyStep } = require('./logic/shiny');
 const { targetListFor } = require('./logic/categorize');
 const { decideRepelUse } = require('./logic/repel');
 const { resolveRuntime } = require('./logic/runtime');
-const { loadRuntime, saveRuntime } = require('./utils/runtimeStore');
+const { loadRuntime, saveRuntime, loadShinyStats, saveShinyStats } = require('./utils/runtimeStore');
+const { recordTrip } = require('./logic/shinyStats');
 
 const log = logger.child({ module: 'main' });
 
@@ -141,6 +142,11 @@ let runtime = loadRuntime();
 // Stan trybu Shiny - patrz logic/shiny.js.
 let shiny = runtime?.shiny || null;
 let firstConfigLoad = true;
+// Statystyki Golden Nest per lokacja (shiny-stats.json). Zapis co
+// SHINY_STATS_SAVE_EVERY wypraw i od razu po Golden Nescie.
+let shinyStats = loadShinyStats();
+let shinyStatsUnsaved = 0;
+const SHINY_STATS_SAVE_EVERY = 20;
 
 // Wczytuje config.json z walidacja. Zepsuty plik (np. same zera po zaniku
 // pradu) albo bledne wartosci nie zatrzymuja bota: zostaje na ostatnim
@@ -494,6 +500,21 @@ while (true){
       // powyzej 75 poziomu) zeruje licznik - zostajemy i szukamy dalej.
       // Po wyczerpaniu prob idziemy na kolejna lokacje.
       if (accountConfig.shinyHunt) {
+        // Statystyka liczona dla lokacji, na ktorej byla ta wyprawa - przed
+        // ewentualna zmiana lokacji ponizej.
+        shinyStats = recordTrip(shinyStats, {
+          region: accountConfig.region,
+          location: accountConfig.adventureNr,
+          name: locationInfo?.name,
+          goldenNest: goldenNestFound,
+          caught: goldenNestCaught,
+        });
+        shinyStatsUnsaved++;
+        if (goldenNestFound || shinyStatsUnsaved >= SHINY_STATS_SAVE_EVERY) {
+          await saveShinyStats(shinyStats);
+          shinyStatsUnsaved = 0;
+        }
+
         // Decyzja w logic/shiny.js, tutaj tylko wykonanie akcji.
         const maxTries = maxTriesFrom(accountConfig);
         const step = shinyStep(shiny, {

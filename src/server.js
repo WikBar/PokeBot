@@ -7,6 +7,8 @@ const { logger } = require('./utils/logger');
 const { setForceHospital } = require('./state');
 const { REPEL_ITEM_NAMES } = require('./actions/equipment');
 const { validateConfig } = require('./validation/config');
+const { loadJson, RUNTIME_PATH, SHINY_STATS_PATH } = require('./utils/runtimeStore');
+const { summarize } = require('./logic/shinyStats');
 
 const log = logger.child({ module: 'server' });
 
@@ -41,6 +43,7 @@ function makeRequireApiKey(apiKey) {
 function createApp({ paths = {}, apiKey = process.env.API_KEY || null } = {}) {
   const P = {
     config: CONFIG_PATH, daily: DAILY_PATH, team: TEAM_PATH, locations: LOCATIONS_PATH,
+    runtime: RUNTIME_PATH, shinyStats: SHINY_STATS_PATH,
     ...paths,
   };
   const app = express();
@@ -117,6 +120,20 @@ function createApp({ paths = {}, apiKey = process.env.API_KEY || null } = {}) {
       all[name] = Object.keys(locs).map(Number).sort((a, b) => a - b);
     }
     res.json({ locations: all });
+  });
+
+  // Polowanie na Shiny: biezacy stan (lokacja, proby, blokada) i statystyki
+  // Golden Nest per lokacja, od najlepszej.
+  app.get('/api/shiny', async (req, res) => {
+    const runtime = loadJson(P.runtime);
+    const stats = loadJson(P.shinyStats) || {};
+    const config = await loadFromFile(P.config);
+    const region = req.query.region || runtime?.region || config?.region;
+    res.json({
+      region,
+      runtime,
+      locations: summarize(stats, region),
+    });
   });
 
   app.get('/api/daily', async (req, res) => {

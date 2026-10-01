@@ -15,6 +15,8 @@ function setup() {
     locations: path.join(dir, 'locations.json'),
     team: path.join(dir, 'team.json'),
     daily: path.join(dir, 'daily-state.json'),
+    runtime: path.join(dir, 'runtime-state.json'),
+    shinyStats: path.join(dir, 'shiny-stats.json'),
   };
   fs.copyFileSync(path.join(ROOT, 'config', 'locations.json'), paths.locations);
   fs.writeFileSync(paths.team, JSON.stringify({ team: [] }));
@@ -78,6 +80,18 @@ test('API: nieczytelny config - 500 zamiast nadpisania samym patchem (regresja)'
     const res = await s.call('POST', '/api/config', { adventureNr: 2 });
     assert.equal(res.status, 500);
     assert.equal(fs.readFileSync(s.paths.config).every((b) => b === 0), true);
+  } finally { s.close(); }
+});
+
+test('API: /api/shiny - stan i statystyki', async () => {
+  const s = await setup();
+  try {
+    fs.writeFileSync(s.paths.runtime, JSON.stringify({ region: 'Johto', baseAdventureNr: 4, adventureNr: 5, shiny: { tries: 3, hold: 0, locationNr: 5 } }));
+    fs.writeFileSync(s.paths.shinyStats, JSON.stringify({ Johto: { 5: { name: 'Ruiny Miasta', trips: 200, goldenNests: 2, caught: 1 } } }));
+    const body = await (await s.call('GET', '/api/shiny')).json();
+    assert.equal(body.region, 'Johto');
+    assert.equal(body.runtime.adventureNr, 5);
+    assert.equal(body.locations[0].perThousand, 10);
   } finally { s.close(); }
 });
 

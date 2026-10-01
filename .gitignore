@@ -6,3 +6,4 @@ config/daily-state.json
 config/team.json
 config/*.tmp
 config/runtime-state.json
+config/shiny-stats.json
