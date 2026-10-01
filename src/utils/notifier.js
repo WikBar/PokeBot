@@ -238,4 +238,6 @@ module.exports = {
   notifyShinyNextLocation,
   isNotifierConfigured,
   getProvider,
+  getTelegramConfig,
+  sendViaTelegram,
 };

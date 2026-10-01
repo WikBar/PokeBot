@@ -16,6 +16,7 @@ const { notifyShinyHold, notifyShinyNextLocation, notifyGoldenNest, notifyGolden
 const { acquireLock, releaseLock } = require('./utils/instanceLock');
 const { validateConfig, validateLocations } = require('./validation/config');
 const { startServer } = require('./server');
+const { startTelegramCommands } = require('./utils/telegramBot');
 const state = require('./state');
 const { isSpecialLocationDay, pickNextLocation } = require('./logic/locations');
 const { createShinyState, maxTriesFrom, shinyStep } = require('./logic/shiny');
@@ -88,6 +89,9 @@ const SAME_TYPE_MAX_LV = 50;
   const page = await context.newPage();
 
   startServer();
+  // Komendy z Telegrama (/status, /pauza, /szpital...). Bez konfiguracji
+  // Telegrama nic nie robi.
+  startTelegramCommands();
 
   // Panel od razu pokazuje ostatnio znany stan plecaka,
   // zanim bot po raz pierwszy do niego zajrzy.

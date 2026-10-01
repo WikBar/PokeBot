@@ -18,7 +18,8 @@ const ROOT = path.resolve(__dirname, '..');
 require('dotenv').config({ path: path.join(ROOT, process.env.NODE_ENV === 'production' ? '.env.production' : '.env') });
 process.env.LOG_TO_FILE = 'false';
 
-const { parseLine, analyzeLogs } = require('../src/logic/logAnalysis');
+const { analyzeLogs } = require('../src/logic/logAnalysis');
+const { listLogFiles, readEntries } = require('../src/utils/logReader');
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(name);
@@ -32,32 +33,10 @@ function parseSince(value) {
   return Date.now() - Number(m[1]) * (m[2] === 'd' ? 86400000 : 3600000);
 }
 
-function readEntries(files) {
-  const entries = [];
-  let nullBytes = 0;
-  for (const file of files) {
-    const buf = fs.readFileSync(file);
-    let zeros = 0;
-    for (const b of buf) if (b === 0) zeros++;
-    nullBytes += zeros;
-    for (const line of buf.toString('utf8').replace(/\0+/g, '\n').split(/\r?\n/)) {
-      const e = parseLine(line.trim());
-      if (e) entries.push(e);
-    }
-  }
-  entries.sort((a, b) => a.ts - b.ts);
-  return { entries, nullBytes };
-}
-
 async function main() {
   const since = parseSince(arg('--since', '24h'));
   const fileArg = arg('--file', null);
-  const files = fileArg
-    ? [path.resolve(fileArg)]
-    : fs.readdirSync(path.join(ROOT, 'logs'))
-      .filter((f) => /^app-\d{4}-\d{2}-\d{2}.*\.log$/.test(f))
-      .map((f) => path.join(ROOT, 'logs', f))
-      .filter((f) => fs.statSync(f).mtimeMs >= since);
+  const files = fileArg ? [path.resolve(fileArg)] : listLogFiles(since);
 
   if (files.length === 0) {
     console.log('Brak plików logów w podanym okresie.');
