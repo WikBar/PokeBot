@@ -37,7 +37,8 @@ async function getUpdates(token, offset, timeout) {
 }
 
 // Odpowiedz na komende; efekty (pauza, szpital) przez te same flagi co panel.
-function respond(command) {
+// args - tekst po komendzie (np. "rawst" w "/targ rawst").
+function respond(command, args = '') {
   switch (command) {
     case 'status':
       return formatStatus(state.getState());
@@ -61,7 +62,7 @@ function respond(command) {
       return formatReport(analyzeLogs(entries, { since, nullBytes }));
     }
     case 'market':
-      return formatMarket(loadSummary());
+      return formatMarket(loadSummary(), Date.now(), args);
     case 'help':
       return HELP;
     default:
@@ -81,7 +82,7 @@ async function handleUpdate(update, chatId) {
   log.info(`Telegram: komenda ${msg.text.split(/\s+/)[0]}`);
   let reply;
   try {
-    reply = respond(command);
+    reply = respond(command, msg.text.trim().split(/\s+/).slice(1).join(' '));
   } catch (e) {
     reply = `Błąd: ${String(e).slice(0, 200)}`;
   }

@@ -46,6 +46,8 @@ test('ScanMarket: katalog, oferty przez fetch, historia, podsumowanie; glowna ka
       historyPath: path.join(dir, 'history.jsonl'),
       summaryPath: path.join(dir, 'summary.json'),
       watch: ['rawst_berry', 'nie_ma_takiego'],
+      scanAll: false,
+      delayMs: 0,
       notify: false,
     };
     const result = await ScanMarket(context, opts);
@@ -58,12 +60,25 @@ test('ScanMarket: katalog, oferty przez fetch, historia, podsumowanie; glowna ka
     assert.equal(rawst.name, 'Rawst Jagody');
     assert.equal(rawst.offers, 16);
     assert.equal(rawst.lowest, 30000);
-    assert.equal(rawst.historyOffers, 10);   // 10 ofert w ¥, 6 tylko za zaslugi
+    assert.equal(rawst.watched, true);
+    assert.equal(rawst.scans, 1);
 
-    // Drugi odczyt tych samych ofert nie dubluje historii w statystykach.
+    // Historia: jedno podsumowanie na przedmiot i odczyt.
     const again = await ScanMarket(context, opts);
-    assert.equal(again.summary.items[0].historyOffers, 10);
-    assert.equal(fs.readFileSync(opts.historyPath, 'utf8').trim().split('\n').length, 20);
+    assert.equal(again.summary.items[0].scans, 2);
+    const lines = fs.readFileSync(opts.historyPath, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    assert.equal(lines.length, 2);
+    assert.deepEqual(Object.keys(lines[0]).sort(), ['item', 'low', 'median', 'n', 'supply', 'ts']);
+    assert.equal(lines[0].low, 30000);
+    assert.equal(lines[0].n, 10);   // 10 ofert w ¥, 6 tylko za zaslugi
+
+    // Przeglad calego katalogu: wszystkie 103 przedmioty, obserwowane
+    // najpierw, pozostale po 1 stronie ofert.
+    requests.length = 0;
+    const all = await ScanMarket(context, { ...opts, scanAll: true });
+    assert.equal(all.summary.items.length, 103);
+    assert.equal(all.summary.items[0].code, 'rawst_berry');
+    assert.equal(requests.filter((u) => u.includes('oferty_strona')).length, 103);
 
     // Glowna karta dalej na stronie z timerem opieki, karta targu zamknieta.
     assert.equal(await main.locator('#timer').count(), 1);

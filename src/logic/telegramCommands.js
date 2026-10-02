@@ -32,7 +32,8 @@ const HELP = [
   '/szpital - idź do Centrum Pokemon',
   '/shiny - stan polowania i najlepsze lokacje',
   '/raport - anomalie z logów (24 h)',
-  '/targ - ceny na targu, okazje, sugerowane ceny sprzedaży',
+  '/targ - przegląd targu: obserwowane, okazje',
+  '/targ <nazwa> - ceny konkretnego przedmiotu, np. /targ rawst',
 ].join('\n');
 
 const minutesAgo = (iso, now) => {
@@ -85,24 +86,50 @@ function formatReport({ findings, stats }) {
 
 const yen = (n) => (n == null ? '-' : `${Number(n).toLocaleString('pl-PL')} ¥`);
 
+const MARKET_QUERY_LIMIT = 10;
+
+function formatMarketItem(i) {
+  const trend = i.trend ? `, trend ${Math.round(i.trend * 100)}%` : '';
+  // Typowa najnizsza cena dopiero po kilku odczytach - wczesniej nic nie znaczy.
+  const typical = i.scans >= 3 ? `, zwykle od ${yen(i.typicalLow)}` : `, odczytów: ${i.scans || 0}`;
+  const lines = [i.lowest == null
+    ? `${i.name}: brak ofert w ¥`
+    : `${i.name}: od ${yen(i.lowest)} (${i.offers} ofert)${typical}${trend}`];
+  if (i.suggestedSell) lines.push(`  sprzedaj za ${yen(i.suggestedSell.price)}`);
+  return lines;
+}
+
+const normalize = (s) => String(s || '').toLowerCase()
+  .normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/ł/g, 'l');
+
 // summary: config/market-summary.json (logic/market.buildMarketSummary)
-function formatMarket(summary, now = Date.now()) {
+// query: "/targ rawst" - wyszukanie po nazwie lub kodzie (bez polskich znakow).
+// Bez query: obserwowane przedmioty + najlepsze okazje z calego przegladu
+// (pelna lista ~100 przedmiotow nie zmiescilaby sie w wiadomosci).
+function formatMarket(summary, now = Date.now(), query = '') {
   if (!summary?.items?.length) return 'Brak danych z targu - bot zagląda tam podczas treningu i opieki.';
   const ago = Math.round((now - Date.parse(summary.updatedAt)) / 60000);
-  const lines = [`Targ (odczyt ${ago} min temu):`];
-  for (const i of summary.items) {
-    const trend = i.trend ? `, trend ${Math.round(i.trend * 100)}%` : '';
-    // Typowa najnizsza cena dopiero po kilku odczytach - wczesniej nic nie znaczy.
-    const typical = i.scans >= 3 ? `, zwykle od ${yen(i.typicalLow)}` : `, odczytów: ${i.scans || 0}`;
-    lines.push(`${i.name}: od ${yen(i.lowest)} (${i.offers} ofert)${typical}${trend}`);
-    if (i.suggestedSell) lines.push(`  sprzedaj za ${yen(i.suggestedSell.price)}`);
+  const q = normalize(query).trim();
+
+  if (q) {
+    const found = summary.items.filter((i) => normalize(i.name).includes(q) || normalize(i.code).includes(q));
+    if (!found.length) return `Nie znaleziono "${query}" wśród ${summary.items.length} przedmiotów targu.`;
+    const lines = [`Targ (odczyt ${ago} min temu), "${query}":`];
+    for (const i of found.slice(0, MARKET_QUERY_LIMIT)) lines.push(...formatMarketItem(i));
+    if (found.length > MARKET_QUERY_LIMIT) lines.push(`... i ${found.length - MARKET_QUERY_LIMIT} więcej - zawęź wyszukiwanie.`);
+    return lines.join('\n');
   }
+
+  const lines = [`Targ (odczyt ${ago} min temu, ${summary.items.length} przedmiotów):`];
+  const watched = summary.items.filter((i) => i.watched);
+  for (const i of (watched.length ? watched : summary.items.slice(0, 5))) lines.push(...formatMarketItem(i));
   if (summary.deals?.length) {
-    lines.push('Okazje:');
-    for (const d of summary.deals.slice(0, 5)) {
+    lines.push(`Okazje (${summary.deals.length}):`);
+    for (const d of summary.deals.slice(0, 8)) {
       lines.push(`- ${d.name}: ${yen(d.offer.unitPrice)} × ${d.offer.quantity} (${Math.round(d.ratio * 100)}% typowej ceny)`);
     }
   }
+  lines.push('Konkretny przedmiot: /targ <nazwa>, np. /targ okruch');
   return lines.join('\n');
 }
 

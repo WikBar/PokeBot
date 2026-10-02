@@ -2,11 +2,12 @@ const fs = require('fs');
 const path = require('path');
 const { saveToFile } = require('./fileOperations');
 
-// Historia ofert targu: config/market-history.jsonl (poza gitem), jedna
-// obserwacja na linie: { id, item, unitPrice, quantity, seller, ts }.
+// Historia targu: config/market-scans.jsonl (poza gitem), jedno
+// podsumowanie przedmiotu z odczytu na linie: { ts, item, low, median, n, supply }
+// (logic/market.scanRecords).
 // Dopisywanie linii jest tanie; przy wczytaniu odrzucamy wpisy starsze niz
 // KEEP_DAYS i od czasu do czasu przepisujemy plik bez nich.
-const HISTORY_PATH = path.resolve(__dirname, '..', '..', 'config', 'market-history.jsonl');
+const HISTORY_PATH = path.resolve(__dirname, '..', '..', 'config', 'market-scans.jsonl');
 const SUMMARY_PATH = path.resolve(__dirname, '..', '..', 'config', 'market-summary.json');
 const KEEP_DAYS = 14;
 

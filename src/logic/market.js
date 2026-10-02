@@ -1,7 +1,7 @@
 // Analiza targowiska - czysta logika, niezalezna od wygladu strony.
-// Parser strony (osobno) zamienia oferty na:
-//   { id, item, unitPrice, quantity, seller?, ts }
-// a historia to lista takich obserwacji z kolejnych odczytow.
+// Parser strony (logic/marketParse.js) zamienia oferty na:
+//   { id, item, unitPrice, quantity, meritPrice, seller }
+// a historia to podsumowania kolejnych odczytow (patrz scanRecords).
 
 const DAY_MS = 24 * 3600 * 1000;
 
@@ -17,58 +17,61 @@ function quantile(sorted, q) {
   return Math.round(sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo));
 }
 
-// Statystyki cen per przedmiot z obserwacji z ostatnich `days` dni.
-// - median/p25/min/max: kazda oferta liczy sie raz (po id), nawet jesli
-//   widzielismy ja w wielu odczytach - inaczej dlugo wiszaca droga oferta
-//   zawyzalaby mediane.
-// - typicalLow: mediana NAJNIZSZYCH cen z kolejnych odczytow. To punkt
-//   odniesienia dla okazji i cen sprzedazy - najtansze oferty zawsze leza
+// Historia targu to podsumowania odczytow, jedno na przedmiot i odczyt:
+//   { ts, item, low, median, n, supply }
+// (surowe oferty ~100 przedmiotow co godzine urosnalyby do setek MB).
+
+// Podsumowanie jednego odczytu przedmiotu z ofert w ¥. null bez ofert w ¥.
+function summarizeScan(offers) {
+  const prices = (offers || []).filter((o) => o.unitPrice > 0).map((o) => o.unitPrice).sort((a, b) => a - b);
+  if (!prices.length) return null;
+  return {
+    low: prices[0],
+    median: quantile(prices, 0.5),
+    n: prices.length,
+    supply: (offers || []).filter((o) => o.unitPrice > 0).reduce((s, o) => s + (o.quantity || 0), 0),
+  };
+}
+
+// Wpisy historii z jednego odczytu: { kod: oferty } -> [{ ts, item, ... }].
+function scanRecords(offersByItem, ts) {
+  const out = [];
+  for (const [item, offers] of Object.entries(offersByItem || {})) {
+    const s = summarizeScan(offers);
+    if (s) out.push({ ts, item: normalizeItem(item), ...s });
+  }
+  return out;
+}
+
+// Statystyki per przedmiot z historii z ostatnich `days` dni:
+// - typicalLow: mediana najnizszych cen z kolejnych odczytow - punkt
+//   odniesienia dla okazji i cen sprzedazy (najtansze oferty zawsze leza
 //   ponizej mediany calej listy, wiec porownanie z mediana dawalo
-//   falszywe okazje.
-// - scans: liczba odczytow z tym przedmiotem.
+//   falszywe okazje),
+// - median: typowa mediana listy ofert,
+// - scans: liczba odczytow,
 // - trend: typowa najnizsza cena z ostatniej doby / z wczesniejszych
 //   odczytow (null, gdy historia krotsza niz doba).
-function priceStats(observations, { now = Date.now(), days = 7 } = {}) {
+function priceStats(records, { now = Date.now(), days = 7 } = {}) {
   const since = now - days * DAY_MS;
-  const unique = new Map();
-  const lowsByItem = new Map();   // item -> Map(ts -> najnizsza cena)
-  for (const o of observations || []) {
-    if (!o || o.ts < since || !(o.unitPrice > 0)) continue;
-    const key = o.id != null ? `id:${o.id}` : `${normalizeItem(o.item)}|${o.unitPrice}|${o.seller || ''}`;
-    if (!unique.has(key)) unique.set(key, o);
-    const k = normalizeItem(o.item);
-    if (!lowsByItem.has(k)) lowsByItem.set(k, new Map());
-    const lows = lowsByItem.get(k);
-    if (!lows.has(o.ts) || o.unitPrice < lows.get(o.ts)) lows.set(o.ts, o.unitPrice);
-  }
-
   const byItem = new Map();
-  for (const o of unique.values()) {
-    const k = normalizeItem(o.item);
-    if (!byItem.has(k)) byItem.set(k, { name: o.item, all: [] });
-    byItem.get(k).all.push(o.unitPrice);
+  for (const r of records || []) {
+    if (!r || r.ts < since || !(r.low > 0)) continue;
+    const k = normalizeItem(r.item);
+    if (!byItem.has(k)) byItem.set(k, []);
+    byItem.get(k).push(r);
   }
-
   const stats = new Map();
-  for (const [k, g] of byItem) {
-    const all = g.all.sort((a, b) => a - b);
-    const scanLows = [...lowsByItem.get(k).entries()];
-    const lows = scanLows.map(([, p]) => p).sort((a, b) => a - b);
-    const recent = scanLows.filter(([ts]) => ts >= now - DAY_MS).map(([, p]) => p).sort((a, b) => a - b);
-    const older = scanLows.filter(([ts]) => ts < now - DAY_MS).map(([, p]) => p).sort((a, b) => a - b);
+  const med = (arr) => quantile([...arr].sort((a, b) => a - b), 0.5);
+  for (const [k, list] of byItem) {
+    const recent = list.filter((r) => r.ts >= now - DAY_MS).map((r) => r.low);
+    const older = list.filter((r) => r.ts < now - DAY_MS).map((r) => r.low);
     stats.set(k, {
       item: k,
-      name: g.name,
-      offers: all.length,
-      min: all[0],
-      p25: quantile(all, 0.25),
-      median: quantile(all, 0.5),
-      max: all[all.length - 1],
-      scans: lows.length,
-      typicalLow: quantile(lows, 0.5),
-      trend: recent.length && older.length
-        ? Math.round((quantile(recent, 0.5) / quantile(older, 0.5)) * 100) / 100
-        : null,
+      scans: list.length,
+      typicalLow: med(list.map((r) => r.low)),
+      median: med(list.map((r) => r.median || r.low)),
+      trend: recent.length && older.length ? Math.round((med(recent) / med(older)) * 100) / 100 : null,
     });
   }
   return stats;
@@ -143,37 +146,42 @@ function planPurchases(deals, { budget = 0, balance = Infinity, reserve = 0, max
   }
   return plan;
 }
-
 // Podsumowanie po odczycie targu - dla /targ, panelu i alarmow.
 // offersByItem: { kod: [oferty z parseItemOffers] } (aktualny odczyt),
-// names: { kod: nazwa z katalogu }, history: obserwacje z historii
-// (lacznie z aktualnym odczytem).
-function buildMarketSummary({ offersByItem, names = {}, history, now = Date.now(), dealRatio = 0.85 }) {
+// names: { kod: nazwa z katalogu }, history: wpisy historii (lacznie
+// z aktualnym odczytem), watch: obserwowane kody (alarmy, wiecej stron).
+function buildMarketSummary({ offersByItem, names = {}, history, now = Date.now(), dealRatio = 0.85, watch = [] }) {
   const stats = priceStats(history, { now });
+  const watched = new Set(watch.map(normalizeItem));
   const items = [];
   const deals = [];
   for (const [code, offers] of Object.entries(offersByItem)) {
     const priced = offers.filter((o) => o.unitPrice > 0);
+    const scanned = summarizeScan(priced);
     const s = stats.get(normalizeItem(code)) || null;
-    const lowest = priced.length ? Math.min(...priced.map((o) => o.unitPrice)) : null;
-    const itemDeals = findDeals(priced, stats, { ratio: dealRatio });
-    deals.push(...itemDeals.map((d) => ({ ...d, name: names[code] || code })));
+    const isWatched = watched.has(normalizeItem(code));
+    const name = names[code] || code;
+    deals.push(...findDeals(priced, stats, { ratio: dealRatio })
+      .map((d) => ({ ...d, name, code, watched: isWatched })));
     items.push({
       code,
-      name: names[code] || code,
+      name,
+      watched: isWatched,
       offers: offers.length,
-      lowest,
-      supply: priced.reduce((sum, o) => sum + (o.quantity || 0), 0),
-      median: s?.median ?? null,
+      lowest: scanned?.low ?? null,
+      supply: scanned?.supply ?? 0,
       typicalLow: s?.typicalLow ?? null,
+      median: s?.median ?? null,
       scans: s?.scans ?? 0,
-      p25: s?.p25 ?? null,
       trend: s?.trend ?? null,
-      historyOffers: s?.offers ?? 0,
       suggestedSell: suggestSellPrice(code, priced, stats),
     });
   }
+  deals.sort((a, b) => a.ratio - b.ratio);
   return { updatedAt: new Date(now).toISOString(), items, deals };
 }
 
-module.exports = { normalizeItem, priceStats, findDeals, suggestSellPrice, planPurchases, buildMarketSummary };
+module.exports = {
+  normalizeItem, summarizeScan, scanRecords, priceStats,
+  findDeals, suggestSellPrice, planPurchases, buildMarketSummary,
+};
