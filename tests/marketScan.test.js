@@ -8,7 +8,8 @@ const { chromium } = require('playwright');
 const { ScanMarket } = require('../src/actions/market');
 
 // Atrapa gry: menu "Targ", katalog (wycinek prawdziwej strony) i strona
-// ofert (prawdziwe oferty Rawst, zanonimizowane) pod gra/targ_prz.php.
+// ofert pod gra/targ_prz.php: strona przedmiotu doladowuje oferty osobnym
+// zadaniem (?oferty_strona&...&strona=N) - jak w prawdziwej grze.
 const fixture = (f) => fs.readFileSync(path.join(__dirname, 'fixtures', f), 'utf8');
 const MENU = `
   <a class="dropdown-toggle" href="#">Targ</a>
@@ -16,14 +17,16 @@ const MENU = `
 const PAGES = {
   '/index.php': `<html><body>${MENU}<div id="timer">Pomagasz w PokeCentrum 00:30:00</div></body></html>`,
   '/targ': `<html><body>${MENU}${fixture('market-catalog.html')}</body></html>`,
-  '/gra/targ_prz.php': fixture('market-offers-rawst.html'),
+  // Strona przedmiotu (skrypt doladowujacy oferty) i strona ofert.
+  '/gra/targ_prz.php': fixture('market-item-rawst.html'),
+  oferty: fixture('market-offers-rawst-raw.html'),
 };
 
 test('ScanMarket: katalog, oferty przez fetch, historia, podsumowanie; glowna karta nietknieta', async () => {
   const requests = [];
   const server = http.createServer((req, res) => {
     requests.push(req.url);
-    const page = PAGES[req.url.split('?')[0]];
+    const page = req.url.includes('oferty_strona') ? PAGES.oferty : PAGES[req.url.split('?')[0]];
     res.writeHead(page ? 200 : 404, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(page || 'brak');
   });
@@ -49,6 +52,7 @@ test('ScanMarket: katalog, oferty przez fetch, historia, podsumowanie; glowna ka
     assert.equal(result.ok, true);
     assert.equal(result.catalog, 103);
     assert.ok(requests.some((u) => u.startsWith('/gra/targ_prz.php?szukaj&przedmiot=rawst_berry&zakladka=0')));
+    assert.ok(requests.some((u) => u.startsWith('/gra/targ_prz.php?oferty_strona&&przedmiot=rawst_berry') && u.endsWith('strona=1')));
 
     const rawst = result.summary.items.find((i) => i.code === 'rawst_berry');
     assert.equal(rawst.name, 'Rawst Jagody');

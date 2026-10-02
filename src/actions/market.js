@@ -3,7 +3,7 @@ const path = require('path');
 const { logger } = require('../utils/logger');
 const { loadFromFile, saveToFile } = require('../utils/fileOperations');
 const { sendNotification } = require('../utils/notifier');
-const { parseCatalog, parseItemOffers } = require('../logic/marketParse');
+const { parseCatalog, parseItemOffers, parseOffersPaging, parseOffersPage } = require('../logic/marketParse');
 const { buildMarketSummary } = require('../logic/market');
 const marketStore = require('../utils/marketStore');
 
@@ -51,16 +51,34 @@ async function openViaMenu(page, menuText, itemText) {
   await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
 }
 
-// Oferty jednego przedmiotu: pobieramy strone, ktora laduje przycisk
-// w katalogu (gra/targ_prz.php?szukaj&przedmiot=...), zwyklym fetch z karty
-// gry - z ciasteczkami sesji, bez klikania w zakladki.
-async function fetchItemOffersHtml(tab, item) {
-  const url = new URL(item.href, new URL('gra/', tab.url())).toString();
+// Pobranie strony gry zwyklym fetch z karty gry - z ciasteczkami sesji,
+// tak jak robi to sama gra (jQuery .load), bez klikania w zakladki.
+async function fetchHtml(tab, url) {
   return tab.evaluate(async (u) => {
     const res = await fetch(u, { credentials: 'include', headers: { 'X-Requested-With': 'XMLHttpRequest' } });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.text();
   }, url);
+}
+
+// Strona przedmiotu (to, co laduje przycisk w katalogu) nie zawiera ofert -
+// doladowuje je osobne zadanie z numerem strony. Najtansze oferty sa na
+// poczatku, wiec wystarcza kilka pierwszych stron.
+const MAX_OFFER_PAGES = 3;
+
+async function fetchItemOffers(tab, item) {
+  const itemUrl = new URL(item.href, new URL('gra/', tab.url())).toString();
+  const itemHtml = await fetchHtml(tab, itemUrl);
+  const paging = parseOffersPaging(itemHtml);
+  if (!paging) return { offers: parseItemOffers(itemHtml), html: itemHtml };
+
+  const offers = [];
+  let lastHtml = itemHtml;
+  for (let page = 1; page <= Math.min(paging.totalPages, MAX_OFFER_PAGES); page++) {
+    lastHtml = await fetchHtml(tab, new URL(paging.pageUrl(page), tab.url()).toString());
+    offers.push(...parseOffersPage(lastHtml));
+  }
+  return { offers, html: lastHtml, pages: paging.totalPages };
 }
 
 const fmtYen = (n) => `${Number(n).toLocaleString('pl-PL')} ¥`;
@@ -70,7 +88,7 @@ async function notifyNewDeals(deals) {
   if (!fresh.length) return 0;
   for (const d of fresh) notifiedDeals.add(d.offer.id);
   const lines = fresh.slice(0, 10).map((d) =>
-    `- ${d.name}: ${fmtYen(d.offer.unitPrice)} × ${d.offer.quantity} (${Math.round(d.ratio * 100)}% mediany ${fmtYen(d.median)}), sprzedawca ${d.offer.seller || '?'}`);
+    `- ${d.name}: ${fmtYen(d.offer.unitPrice)} × ${d.offer.quantity} (${Math.round(d.ratio * 100)}% typowej najniższej ceny ${fmtYen(d.reference)}), sprzedawca ${d.offer.seller || '?'}`);
   await sendNotification(`PokeBot - okazje na targu:\n${lines.join('\n')}`);
   return fresh.length;
 }
@@ -84,7 +102,7 @@ async function ScanMarket(context, {
   historyPath = marketStore.HISTORY_PATH,
   summaryPath = marketStore.SUMMARY_PATH,
   watch = DEFAULT_WATCH,
-  dealRatio = 0.7,
+  dealRatio = 0.85,
   notify = true,
 } = {}) {
   let tab = null;
@@ -112,13 +130,15 @@ async function ScanMarket(context, {
     for (const item of items) {
       names[item.code] = item.name;
       try {
-        const html = await fetchItemOffersHtml(tab, item);
-        const offers = parseItemOffers(html);
-        if (offers === null) {
-          // Gra zmienila wyglad strony ofert - zapis do analizy.
+        const { offers, html } = await fetchItemOffers(tab, item);
+        if (offers === null || offers.length === 0) {
+          // Nie rozpoznano strony albo brak ofert (rzadkie dla obserwowanych
+          // przedmiotow) - zapis do analizy.
           saveSnapshot(`oferty-${item.code}`, html, snapshotDir);
-          log.warn(`Targ: nie rozpoznano ofert ${item.name} - zapisano stronę.`);
-          continue;
+          if (offers === null) {
+            log.warn(`Targ: nie rozpoznano ofert ${item.name} - zapisano stronę.`);
+            continue;
+          }
         }
         offersByItem[item.code] = offers;
       } catch (e) {
@@ -164,7 +184,7 @@ async function runMarketScanIfDue(page, now = Date.now()) {
       ? cfg.marketWatchItems
       : DEFAULT_WATCH;
     const ratio = Number(cfg.marketDealRatio);
-    return await ScanMarket(page.context(), { watch, dealRatio: ratio > 0 && ratio < 1 ? ratio : 0.7 });
+    return await ScanMarket(page.context(), { watch, dealRatio: ratio > 0 && ratio < 1 ? ratio : 0.85 });
   } finally {
     scanning = false;
   }

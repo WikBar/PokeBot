@@ -1,49 +1,65 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { priceStats, findDeals, suggestSellPrice, planPurchases } = require('../src/logic/market');
+const {
+  priceStats, findDeals, suggestSellPrice, planPurchases, buildMarketSummary,
+} = require('../src/logic/market');
+const { formatMarket } = require('../src/logic/telegramCommands');
 
 const NOW = Date.parse('2026-10-02T12:00:00Z');
 const H = 3600 * 1000;
-const obs = (id, item, unitPrice, hoursAgo = 30, quantity = 10) =>
-  ({ id, item, unitPrice, quantity, ts: NOW - hoursAgo * H });
 
+// Odczyt targu: najtansza oferta `low` i kilka drozszych, wszystkie z tym
+// samym ts (jak w prawdziwym odczycie).
+let nextId = 1;
+function scan(hoursAgo, low, item = 'ultraballe') {
+  const ts = NOW - hoursAgo * H;
+  return [low, low + 10, low + 40, 200].map((unitPrice) => ({ id: nextId++, item, unitPrice, quantity: 10, ts }));
+}
+// 8 odczytow z typowa najnizsza cena ~100 (w tym 2 sprzed ponad doby).
 const history = [
-  obs(1, 'Ultraballe', 100), obs(2, 'Ultraballe', 110), obs(3, 'Ultraballe', 120),
-  obs(4, 'Ultraballe', 90), obs(5, 'Ultraballe', 105), obs(6, 'Ultraballe', 95, 2),
-  obs(7, 'Jagoda Rawst', 50), obs(8, 'Jagoda Rawst', 60),
+  ...scan(40, 100), ...scan(30, 98), ...scan(20, 102), ...scan(10, 100),
+  ...scan(6, 101), ...scan(4, 99), ...scan(2, 100), ...scan(1, 100),
 ];
 
-test('priceStats: mediana, kwartyl, oferta liczona raz, stare odrzucone', () => {
-  const dup = [...history, { ...history[0] }, obs(99, 'Ultraballe', 9999, 24 * 30)];
-  const s = priceStats(dup, { now: NOW });
-  const u = s.get('ultraballe');
-  assert.equal(u.offers, 6);
-  assert.equal(u.min, 90);
-  assert.equal(u.median, 103);
-  assert.equal(u.max, 120);
-  assert.equal(u.name, 'Ultraballe');
+test('priceStats: typowa najnizsza cena z kolejnych odczytow, oferta liczona raz', () => {
+  const s = priceStats([...history, { ...history[0] }], { now: NOW }).get('ultraballe');
+  assert.equal(s.scans, 8);
+  assert.equal(s.typicalLow, 100);
+  assert.equal(s.offers, 32);
+  assert.equal(s.min, 98);
+  assert.ok(s.median > s.typicalLow);   // mediana calej listy jest zawsze wyzej
 });
 
-test('findDeals: ponizej 70% mediany, tylko przy wystarczajacej historii', () => {
-  const s = priceStats(history, { now: NOW });
+test('priceStats: trend tylko przy historii dluzszej niz doba', () => {
+  // ostatnia doba: mediana najnizszych 100; wczesniej (100, 98): 99 -> 1.01
+  assert.equal(priceStats(history, { now: NOW }).get('ultraballe').trend, 1.01);
+  assert.equal(priceStats(scan(1, 100), { now: NOW }).get('ultraballe').trend, null);
+});
+
+test('findDeals: wzgledem typowej najnizszej ceny, dopiero po 6 odczytach (regresja: falszywe okazje z 1 odczytu)', () => {
   const offers = [
-    { id: 20, item: 'Ultraballe', unitPrice: 60, quantity: 5 },
-    { id: 21, item: 'Ultraballe', unitPrice: 100, quantity: 5 },
-    { id: 22, item: 'Jagoda Rawst', unitPrice: 10, quantity: 5 },   // za malo historii
+    { id: 900, item: 'ultraballe', unitPrice: 80, quantity: 5 },
+    { id: 901, item: 'ultraballe', unitPrice: 95, quantity: 5 },
+    { id: 902, item: 'ultraballe', unitPrice: null, meritPrice: 3, quantity: 5 },
   ];
-  const deals = findDeals(offers, s);
-  assert.deepEqual(deals.map((d) => d.offer.id), [20]);
-  assert.equal(deals[0].ratio, 0.58);
-  assert.deepEqual(findDeals(offers, s, { watchlist: ['Jagoda Rawst'] }), []);
+  const deals = findDeals(offers, priceStats(history, { now: NOW }));
+  assert.deepEqual(deals.map((d) => [d.offer.id, d.reference, d.ratio]), [[900, 100, 0.8]]);
+
+  // Jeden odczyt: najtansze oferty sa daleko ponizej mediany listy, ale to nie okazje.
+  const single = scan(1, 65);
+  assert.deepEqual(findDeals(single, priceStats(single, { now: NOW })), []);
+  assert.deepEqual(findDeals(offers, priceStats(history, { now: NOW }), { watchlist: ['rawst_berry'] }), []);
 });
 
-test('suggestSellPrice: pod najtansza oferta, ale nie ponizej 80% mediany', () => {
+test('suggestSellPrice: pod najtansza oferta, nie ponizej 90% typowej ceny', () => {
   const s = priceStats(history, { now: NOW });
-  assert.equal(suggestSellPrice('Ultraballe', [{ item: 'Ultraballe', unitPrice: 98 }], s).price, 97);
-  const low = suggestSellPrice('Ultraballe', [{ item: 'Ultraballe', unitPrice: 50 }], s);
-  assert.equal(low.price, 83);
-  assert.equal(suggestSellPrice('Ultraballe', [], s).price, 103);
-  assert.equal(suggestSellPrice('Nieznane', [], s), null);
+  assert.equal(suggestSellPrice('ultraballe', [{ item: 'ultraballe', unitPrice: 98 }], s).price, 97);
+  assert.equal(suggestSellPrice('ultraballe', [{ item: 'ultraballe', unitPrice: 50 }], s).price, 90);
+  assert.equal(suggestSellPrice('ultraballe', [], s).price, 100);
+  assert.equal(suggestSellPrice('nieznane', [], s), null);
+  // Przy jednym odczycie bez dolnej granicy - po prostu pod najtansza.
+  const one = priceStats(scan(1, 65), { now: NOW });
+  assert.equal(suggestSellPrice('ultraballe', [{ item: 'ultraballe', unitPrice: 65 }], one).price, 64);
 });
 
 test('planPurchases: budzet, rezerwa, limit sztuk i posiadane', () => {
@@ -63,26 +79,28 @@ test('planPurchases: budzet, rezerwa, limit sztuk i posiadane', () => {
   assert.deepEqual(tight.map((p) => [p.offer.id, p.quantity]), [[1, 4]]);
 });
 
-const { buildMarketSummary } = require('../src/logic/market');
-const { formatMarket } = require('../src/logic/telegramCommands');
-
-test('buildMarketSummary: najnizsza cena, podaz, mediana, okazje z nazwa', () => {
-  const offersByItem = {
-    ultraballe: [
-      { id: 20, item: 'ultraballe', unitPrice: 60, quantity: 5 },
-      { id: 21, item: 'ultraballe', unitPrice: 100, quantity: 7 },
-      { id: 22, item: 'ultraballe', unitPrice: null, meritPrice: 3, quantity: 9 },
-    ],
-  };
-  const hist = history.filter((o) => o.item === 'Ultraballe').map((o) => ({ ...o, item: 'ultraballe' }));
-  const s = buildMarketSummary({ offersByItem, names: { ultraballe: 'Ultraballe' }, history: hist, now: NOW });
+test('buildMarketSummary i /targ', () => {
+  const current = [
+    { id: 950, item: 'ultraballe', unitPrice: 80, quantity: 5, ts: NOW },
+    { id: 951, item: 'ultraballe', unitPrice: 120, quantity: 7, ts: NOW },
+    { id: 952, item: 'ultraballe', unitPrice: null, meritPrice: 3, quantity: 9, ts: NOW },
+  ];
+  const s = buildMarketSummary({
+    offersByItem: { ultraballe: current },
+    names: { ultraballe: 'Ultraballe' },
+    history: [...history, ...current.filter((o) => o.unitPrice)],
+    now: NOW,
+  });
   const u = s.items[0];
-  assert.deepEqual([u.name, u.offers, u.lowest, u.supply, u.median], ['Ultraballe', 3, 60, 12, 103]);
+  assert.deepEqual([u.name, u.offers, u.lowest, u.supply, u.scans], ['Ultraballe', 3, 80, 12, 9]);
   assert.equal(s.deals.length, 1);
-  assert.equal(s.deals[0].name, 'Ultraballe');
   const text = formatMarket(s, NOW + 5 * 60000);
   assert.match(text, /odczyt 5 min temu/);
-  assert.match(text, /Ultraballe: od 60 ¥ \(3 ofert\), mediana 103 ¥/);
-  assert.match(text, /Okazje:\n- Ultraballe: 60 ¥ × 5 \(58% mediany\)/);
+  assert.match(text, /Ultraballe: od 80 ¥ \(3 ofert\), zwykle od 100 ¥/);
+  assert.match(text, /Okazje:\n- Ultraballe: 80 ¥ × 5 \(80% typowej ceny\)/);
   assert.match(formatMarket(null), /Brak danych z targu/);
+
+  const first = buildMarketSummary({ offersByItem: { ultraballe: current }, names: {}, history: current, now: NOW });
+  assert.match(formatMarket(first, NOW), /odczytów: 1/);
+  assert.deepEqual(first.deals, []);
 });

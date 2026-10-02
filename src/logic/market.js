@@ -18,85 +18,103 @@ function quantile(sorted, q) {
 }
 
 // Statystyki cen per przedmiot z obserwacji z ostatnich `days` dni.
-// Kazda oferta liczy sie raz (po id), nawet jesli widzielismy ja w wielu
-// odczytach - inaczej dlugo wiszaca droga oferta zawyzalaby mediane.
-// Zwraca Map: item -> { item, name, offers, min, p25, median, max, trend }
-// trend: mediana z ostatniej doby / mediana z calego okresu (null bez danych).
+// - median/p25/min/max: kazda oferta liczy sie raz (po id), nawet jesli
+//   widzielismy ja w wielu odczytach - inaczej dlugo wiszaca droga oferta
+//   zawyzalaby mediane.
+// - typicalLow: mediana NAJNIZSZYCH cen z kolejnych odczytow. To punkt
+//   odniesienia dla okazji i cen sprzedazy - najtansze oferty zawsze leza
+//   ponizej mediany calej listy, wiec porownanie z mediana dawalo
+//   falszywe okazje.
+// - scans: liczba odczytow z tym przedmiotem.
+// - trend: typowa najnizsza cena z ostatniej doby / z wczesniejszych
+//   odczytow (null, gdy historia krotsza niz doba).
 function priceStats(observations, { now = Date.now(), days = 7 } = {}) {
   const since = now - days * DAY_MS;
   const unique = new Map();
+  const lowsByItem = new Map();   // item -> Map(ts -> najnizsza cena)
   for (const o of observations || []) {
     if (!o || o.ts < since || !(o.unitPrice > 0)) continue;
     const key = o.id != null ? `id:${o.id}` : `${normalizeItem(o.item)}|${o.unitPrice}|${o.seller || ''}`;
     if (!unique.has(key)) unique.set(key, o);
+    const k = normalizeItem(o.item);
+    if (!lowsByItem.has(k)) lowsByItem.set(k, new Map());
+    const lows = lowsByItem.get(k);
+    if (!lows.has(o.ts) || o.unitPrice < lows.get(o.ts)) lows.set(o.ts, o.unitPrice);
   }
 
   const byItem = new Map();
   for (const o of unique.values()) {
     const k = normalizeItem(o.item);
-    if (!byItem.has(k)) byItem.set(k, { name: o.item, all: [], recent: [] });
-    const g = byItem.get(k);
-    g.all.push(o.unitPrice);
-    if (o.ts >= now - DAY_MS) g.recent.push(o.unitPrice);
+    if (!byItem.has(k)) byItem.set(k, { name: o.item, all: [] });
+    byItem.get(k).all.push(o.unitPrice);
   }
 
   const stats = new Map();
   for (const [k, g] of byItem) {
     const all = g.all.sort((a, b) => a - b);
-    const recent = g.recent.sort((a, b) => a - b);
-    const median = quantile(all, 0.5);
+    const scanLows = [...lowsByItem.get(k).entries()];
+    const lows = scanLows.map(([, p]) => p).sort((a, b) => a - b);
+    const recent = scanLows.filter(([ts]) => ts >= now - DAY_MS).map(([, p]) => p).sort((a, b) => a - b);
+    const older = scanLows.filter(([ts]) => ts < now - DAY_MS).map(([, p]) => p).sort((a, b) => a - b);
     stats.set(k, {
       item: k,
       name: g.name,
       offers: all.length,
       min: all[0],
       p25: quantile(all, 0.25),
-      median,
+      median: quantile(all, 0.5),
       max: all[all.length - 1],
-      trend: recent.length && median ? Math.round((quantile(recent, 0.5) / median) * 100) / 100 : null,
+      scans: lows.length,
+      typicalLow: quantile(lows, 0.5),
+      trend: recent.length && older.length
+        ? Math.round((quantile(recent, 0.5) / quantile(older, 0.5)) * 100) / 100
+        : null,
     });
   }
   return stats;
 }
 
-// Okazje: oferty ponizej `ratio` mediany. Wymagamy minimum `minHistory`
-// ofert w historii - przy 2-3 ofertach "mediana" nic nie znaczy.
-// watchlist (opcjonalnie): tylko te przedmioty.
-// Zwraca liste { offer, median, ratio } posortowana od najlepszej.
-function findDeals(offers, stats, { ratio = 0.7, minHistory = 5, watchlist = null } = {}) {
+// Okazje: oferty ponizej `ratio` typowej najnizszej ceny (typicalLow).
+// Wymagamy `minScans` odczytow - z jednego-dwoch odczytow nie wiadomo,
+// jaka cena jest typowa.
+// Zwraca liste { offer, reference, ratio } posortowana od najlepszej.
+function findDeals(offers, stats, { ratio = 0.85, minScans = 6, watchlist = null } = {}) {
   const watched = watchlist ? new Set(watchlist.map(normalizeItem)) : null;
   const deals = [];
   for (const offer of offers || []) {
+    if (!(offer.unitPrice > 0)) continue;
     const k = normalizeItem(offer.item);
     if (watched && !watched.has(k)) continue;
     const s = stats.get(k);
-    if (!s || s.offers < minHistory || !s.median) continue;
-    const r = offer.unitPrice / s.median;
-    if (r <= ratio) deals.push({ offer, median: s.median, ratio: Math.round(r * 100) / 100 });
+    if (!s || s.scans < minScans || !s.typicalLow) continue;
+    const r = offer.unitPrice / s.typicalLow;
+    if (r <= ratio) deals.push({ offer, reference: s.typicalLow, ratio: Math.round(r * 100) / 100 });
   }
   return deals.sort((a, b) => a.ratio - b.ratio);
 }
 
 // Sugerowana cena wystawienia: tuz pod najtansza aktualna oferta (zeby
-// sprzedac szybko), ale nie ponizej `floor` mediany z historii (zeby nie
-// psuc ceny przez jedna oferte-okazje). Bez danych - null.
-function suggestSellPrice(item, currentOffers, stats, { undercut = 1, floor = 0.8 } = {}) {
+// sprzedac szybko), ale nie ponizej `floor` typowej najnizszej ceny, gdy
+// ta jest juz znana (min. `minScans` odczytow) - zeby jedna oferta-okazja
+// nie zbila ceny. Bez danych - null.
+function suggestSellPrice(item, currentOffers, stats, { undercut = 1, floor = 0.9, minScans = 3 } = {}) {
   const k = normalizeItem(item);
   const s = stats.get(k);
   const current = (currentOffers || [])
     .filter((o) => normalizeItem(o.item) === k && o.unitPrice > 0)
     .map((o) => o.unitPrice);
   const lowest = current.length ? Math.min(...current) : null;
-  const minAllowed = s?.median ? Math.ceil(s.median * floor) : 0;
+  const known = s && s.scans >= minScans && s.typicalLow;
+  const minAllowed = known ? Math.ceil(s.typicalLow * floor) : 0;
 
-  if (lowest === null && !s) return null;
-  if (lowest === null) return { price: s.median, reason: 'brak aktualnych ofert - mediana z historii' };
+  if (lowest === null && !known) return null;
+  if (lowest === null) return { price: s.typicalLow, reason: 'brak aktualnych ofert - typowa najniższa cena' };
   const price = Math.max(lowest - undercut, minAllowed);
   return {
     price,
     reason: price === lowest - undercut
       ? `o ${undercut} ¥ taniej niż najtańsza oferta (${lowest})`
-      : `najtańsza oferta (${lowest}) poniżej ${Math.round(floor * 100)}% mediany - trzymam ${minAllowed}`,
+      : `najtańsza oferta (${lowest}) poniżej ${Math.round(floor * 100)}% typowej ceny - trzymam ${minAllowed}`,
   };
 }
 
@@ -130,7 +148,7 @@ function planPurchases(deals, { budget = 0, balance = Infinity, reserve = 0, max
 // offersByItem: { kod: [oferty z parseItemOffers] } (aktualny odczyt),
 // names: { kod: nazwa z katalogu }, history: obserwacje z historii
 // (lacznie z aktualnym odczytem).
-function buildMarketSummary({ offersByItem, names = {}, history, now = Date.now(), dealRatio = 0.7 }) {
+function buildMarketSummary({ offersByItem, names = {}, history, now = Date.now(), dealRatio = 0.85 }) {
   const stats = priceStats(history, { now });
   const items = [];
   const deals = [];
@@ -147,6 +165,8 @@ function buildMarketSummary({ offersByItem, names = {}, history, now = Date.now(
       lowest,
       supply: priced.reduce((sum, o) => sum + (o.quantity || 0), 0),
       median: s?.median ?? null,
+      typicalLow: s?.typicalLow ?? null,
+      scans: s?.scans ?? 0,
       p25: s?.p25 ?? null,
       trend: s?.trend ?? null,
       historyOffers: s?.offers ?? 0,

@@ -1,0 +1,11 @@
+<h2>Oferty</h2><div class="text-center"><ul id="pagination-targ_prz-gora" class="pagination pagination-targ_prz"></ul></div><div id="targ_prz_oferty">Trwa ładowanie...</div>		
+<div class="text-center"><ul id="pagination-targ_prz-dol" class="pagination pagination-targ_prz"></ul></div>
+<script>
+	$('.pagination-targ_prz').twbsPagination({
+	totalPages: 1,
+	visiblePages: 10,
+	onPageClick: function (event, page) {
+		$('#targ_prz_oferty').load( "gra/targ_prz.php?oferty_strona&&przedmiot=rawst_berry&value587&strona="+page);
+	}
+});
+</script><br/><center><i><b>Uwaga:</b> W okienkach wpisujemy ile towaru chcemy kupić, a nie za jaką kwotę.</i><br/><i><b>Uwaga2:</b> W Przypadku podania ilości większej niż cię stać na to, zostanie zakupiona maksymalna możliwa ilość towaru.</i></center></div></div><script src="js/okno_glowne_reload.js?v=1"></script>

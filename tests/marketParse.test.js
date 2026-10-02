@@ -51,3 +51,24 @@ test('parseItemOffers: strona bez ofert - null, pusta lista ofert - []', () => {
   assert.equal(parseItemOffers('<html>Logowanie</html>'), null);
   assert.deepEqual(parseItemOffers('<h2>Oferty</h2><div id="targ_prz_oferty"></div>'), []);
 });
+
+const { parseOffersPaging, parseOffersPage } = require('../src/logic/marketParse');
+
+test('parseOffersPaging: liczba stron i adres doladowania ofert (prawdziwy fragment)', () => {
+  const paging = parseOffersPaging(fs.readFileSync(path.join(__dirname, 'fixtures', 'market-item-rawst.html'), 'utf8'));
+  assert.equal(paging.totalPages, 1);
+  assert.equal(paging.pageUrl(2), 'gra/targ_prz.php?oferty_strona&&przedmiot=rawst_berry&value587&strona=2');
+  assert.equal(parseOffersPaging('<div>bez skryptu</div>'), null);
+  assert.equal(parseOffersPage(offersHtml).length, 16);
+  assert.deepEqual(parseOffersPage(''), []);
+});
+
+test('parseOffersPage: surowa odpowiedz serwera (atrybuty w apostrofach, &yen;) - regresja', () => {
+  const raw = fs.readFileSync(path.join(__dirname, 'fixtures', 'market-offers-rawst-raw.html'), 'utf8');
+  assert.match(raw, /<form class='tr'/);
+  const offers = parseOffersPage(raw);
+  assert.equal(offers.length, 16);
+  assert.deepEqual(offers[0], {
+    id: 3961166, item: 'rawst_berry', quantity: 3569, unitPrice: 30000, meritPrice: null, seller: 'Gracz1',
+  });
+});

@@ -1,4 +1,6 @@
 // Parsery stron targu (gra/targ_prz.php) - czyste funkcje na HTML.
+// Serwer zwraca atrybuty w apostrofach (class='tr'), a strona zapisana
+// z przegladarki - w cudzyslowach; regexy akceptuja oba zapisy.
 //
 // "Kup - Przedmioty" to katalog: zakladki (Jagody, Pokeballe, Okruchy,
 // Inne, Ewolucyjne, Trzymane) z przyciskami
@@ -18,16 +20,16 @@ const stripTags = (s) => decode(String(s).replace(/<br\s*\/?>/gi, ' ').replace(/
 // przedmiot (np. "ultraballe"), uzywana w configu marketWatchItems.
 function parseCatalog(html) {
   const tabNames = {};
-  const tabRe = /<a href="#(targ_kupprz-[\w-]+)"[^>]*>([^<]+)<\/a>/g;
+  const tabRe = /<a href=["']#(targ_kupprz-[\w-]+)["'][^>]*>([^<]+)<\/a>/g;
   let m;
   while ((m = tabRe.exec(html))) tabNames[m[1]] = m[2].trim();
 
   // Dzielimy po panelach zakladek, zeby przypisac przedmiot do zakladki.
   const items = [];
-  const paneRe = /<div role="tabpanel"[^>]*id="(targ_kupprz-[\w-]+)"[^>]*>([\s\S]*?)(?=<div role="tabpanel"|$)/g;
+  const paneRe = /<div role=["']tabpanel["'][^>]*id=["'](targ_kupprz-[\w-]+)["'][^>]*>([\s\S]*?)(?=<div role=["']tabpanel|$)/g;
   while ((m = paneRe.exec(html))) {
     const [, paneId, body] = m;
-    const btnRe = /<button[^>]*href="([^"]*przedmiot=([\w-]+)[^"]*)"[^>]*>([\s\S]*?)<\/button>/g;
+    const btnRe = /<button[^>]*href=["']([^"']*przedmiot=([\w-]+)[^"']*)["'][^>]*>([\s\S]*?)<\/button>/g;
     let b;
     while ((b = btnRe.exec(body))) {
       const href = decode(b[1]);
@@ -64,16 +66,16 @@ function parsePrice(text) {
 // gdy to nie jest strona ofert (np. zmienil sie wyglad gry).
 // unitPrice = cena w ¥ (null, gdy oferta tylko za zaslugi).
 function parseItemOffers(html) {
-  if (!/<h2>\s*Oferty\s*<\/h2>/i.test(html) && !/name="id_oferty"/.test(html)) return null;
+  if (!/<h2>\s*Oferty\s*<\/h2>/i.test(html) && !/name=["']id_oferty["']/.test(html)) return null;
 
   const offers = [];
-  const formRe = /<form class="tr"[^>]*action="([^"]*)"[^>]*>([\s\S]*?)<\/form>/g;
+  const formRe = /<form class=["']tr["'][^>]*action=["']([^"']*)["'][^>]*>([\s\S]*?)<\/form>/g;
   let m;
   while ((m = formRe.exec(html))) {
     const action = decode(m[1]);
     const body = m[2];
-    const cells = [...body.matchAll(/<span class="td[^"]*">([\s\S]*?)<\/span>/g)].map((c) => c[1]);
-    const id = (body.match(/name="id_oferty" value="(\d+)"/) || [])[1];
+    const cells = [...body.matchAll(/<span class=["']td[^"']*["']>([\s\S]*?)<\/span>/g)].map((c) => c[1]);
+    const id = (body.match(/name=["']id_oferty["'] value=["'](\d+)["']/) || [])[1];
     if (!id || cells.length < 4) continue;
     offers.push({
       id: Number(id),
@@ -87,4 +89,22 @@ function parseItemOffers(html) {
   return offers;
 }
 
-module.exports = { parseCatalog, parseItemOffers, stripTags };
+// Strona przedmiotu nie zawiera ofert - doladowuje je skrypt:
+//   $('.pagination-targ_prz').twbsPagination({ totalPages: 3, ...
+//     $('#targ_prz_oferty').load("gra/targ_prz.php?oferty_strona&&przedmiot=rawst_berry&value587&strona="+page);
+// Zwraca { totalPages, pageUrl(n) } albo null, gdy skryptu nie ma.
+function parseOffersPaging(html) {
+  const load = html.match(/#targ_prz_oferty'\)\.load\(\s*["']([^"']+strona=)["']\s*\+\s*page/);
+  if (!load) return null;
+  const totalPages = Number((html.match(/totalPages:\s*(\d+)/) || [])[1]) || 1;
+  const base = decode(load[1]);
+  return { totalPages, pageUrl: (n) => `${base}${n}` };
+}
+
+// Jedna strona doladowanych ofert (fragment z formularzami ofert).
+// Pusta strona = brak ofert = [].
+function parseOffersPage(html) {
+  return parseItemOffers(`<h2>Oferty</h2>${html}`) || [];
+}
+
+module.exports = { parseCatalog, parseItemOffers, parseOffersPaging, parseOffersPage, stripTags };

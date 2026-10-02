@@ -92,13 +92,15 @@ function formatMarket(summary, now = Date.now()) {
   const lines = [`Targ (odczyt ${ago} min temu):`];
   for (const i of summary.items) {
     const trend = i.trend ? `, trend ${Math.round(i.trend * 100)}%` : '';
-    lines.push(`${i.name}: od ${yen(i.lowest)} (${i.offers} ofert), mediana ${yen(i.median)}${trend}`);
+    // Typowa najnizsza cena dopiero po kilku odczytach - wczesniej nic nie znaczy.
+    const typical = i.scans >= 3 ? `, zwykle od ${yen(i.typicalLow)}` : `, odczytów: ${i.scans || 0}`;
+    lines.push(`${i.name}: od ${yen(i.lowest)} (${i.offers} ofert)${typical}${trend}`);
     if (i.suggestedSell) lines.push(`  sprzedaj za ${yen(i.suggestedSell.price)}`);
   }
   if (summary.deals?.length) {
     lines.push('Okazje:');
     for (const d of summary.deals.slice(0, 5)) {
-      lines.push(`- ${d.name}: ${yen(d.offer.unitPrice)} × ${d.offer.quantity} (${Math.round(d.ratio * 100)}% mediany)`);
+      lines.push(`- ${d.name}: ${yen(d.offer.unitPrice)} × ${d.offer.quantity} (${Math.round(d.ratio * 100)}% typowej ceny)`);
     }
   }
   return lines.join('\n');
