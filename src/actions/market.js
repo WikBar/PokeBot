@@ -9,6 +9,7 @@ const marketStore = require('../utils/marketStore');
 const { loadJson } = require('../utils/runtimeStore');
 const { parseHodowla, parsePokemonOfDay, parsePokemonOffers } = require('../logic/pokemonParse');
 const { groupBySpecies, speciesToCheck, analyzeHodowla } = require('../logic/pokemonSale');
+const { offerRecords, findPokemonDeals } = require('../logic/pokemonHistory');
 
 const log = logger.child({ module: 'market' });
 
@@ -101,9 +102,11 @@ const POKEMON_SEARCH = (name) => 'gra/targ_pok.php?oferty=&sz=&nazwa_pokemona=' 
 const HODOWLA_URL = 'gra/hodowla.php?wszystkie';
 const POKEMON_MARKET_PATH = path.resolve(__dirname, '..', '..', 'config', 'pokemon-market.json');
 const POKEMON_SALE_PATH = path.resolve(__dirname, '..', '..', 'config', 'pokemon-sale.json');
-// Gatunkow na jeden odczyt (najcenniejsze najpierw); cala Hodowla (~600
-// gatunkow) obrocona w ok. 10 odczytow. Wynik gatunku wazny 24 h.
-const POKEMON_SPECIES_PER_SCAN = 60;
+// Historia ofert pokemonow (logic/pokemonHistory.js) - do wykresow i okazji.
+const POKEMON_HISTORY_PATH = path.resolve(__dirname, '..', '..', 'config', 'pokemon-offers.jsonl');
+// Gatunkow na jeden odczyt (najcenniejsze najpierw, marketPokemonPerScan);
+// przy 100 cala Hodowla (~600 gatunkow) obrocona w ok. 6 odczytow.
+const POKEMON_SPECIES_PER_SCAN = 100;
 // Domyslny prog wartosci skupu (marketPokemonMaxValue w configu).
 const POKEMON_MAX_VALUE = 800000;
 
@@ -112,7 +115,8 @@ const POKEMON_MAX_VALUE = 800000;
 async function scanPokemonMarket(tab, {
   cachePath = POKEMON_MARKET_PATH, reportPath = POKEMON_SALE_PATH,
   limit = POKEMON_SPECIES_PER_SCAN, delayMs = REQUEST_DELAY_MS,
-  maxValue = POKEMON_MAX_VALUE,
+  maxValue = POKEMON_MAX_VALUE, historyPath = POKEMON_HISTORY_PATH,
+  notify = true, dealRatio = 0.8,
 } = {}) {
   try {
     const hodowlaHtml = await fetchHtml(tab, new URL(HODOWLA_URL, tab.url()).toString());
@@ -142,6 +146,7 @@ async function scanPokemonMarket(tab, {
           offers = parsePokemonOffers(await fetchHtml(tab, new URL(paging.pageUrl(1), tab.url()).toString()));
         }
         cache[name] = { ts: now, offers, pages: paging?.totalPages || 0 };
+        marketStore.appendHistory(offerRecords(name, offers, now), historyPath);
         checked++;
       } catch (e) {
         log.warn(`Targ pokemonów: nie udało się sprawdzić ${name}`, { error: String(e) });
@@ -149,10 +154,22 @@ async function scanPokemonMarket(tab, {
     }
     await saveToFile(cachePath, { updatedAt: new Date(now).toISOString(), species: cache });
 
-    const report = { updatedAt: new Date(now).toISOString(), pokemonOfDay, excluded, ...analyzeHodowla(hodowla, cache, { pokemonOfDay }) };
+    // Okazje z najnowszych ofert wszystkich gatunkow sprawdzonych w ciagu
+    // doby (nie tylko z tej porcji) wzgledem historii cen.
+    const history = marketStore.loadHistory(historyPath, now);
+    const fresh = Object.fromEntries(Object.entries(cache)
+      .filter(([, c]) => c.ts > now - 24 * 3600 * 1000).map(([sp, c]) => [sp, c.offers]));
+    const deals = findPokemonDeals(fresh, history, { ratio: dealRatio });
+    const notified = notify ? await notifyPokemonDeals(deals) : 0;
+
+    const report = {
+      updatedAt: new Date(now).toISOString(), pokemonOfDay, excluded,
+      ...analyzeHodowla(hodowla, cache, { pokemonOfDay }),
+      deals: deals.slice(0, 50).map((d) => ({ ...d, offer: { ...d.offer, seller: undefined } })),
+    };
     await saveToFile(reportPath, report);
     log.info(`Targ pokemonów: sprawdzono ${checked} gatunków (łącznie ${report.checked}/${report.species}), ` +
-      `opłaca się targ: ${report.market.length}, do skupu: ${report.sellToNpc}.`);
+      `opłaca się targ: ${report.market.length}, okazje poniżej wartości: ${deals.length} (nowe zgłoszone: ${notified}).`);
     return report;
   } catch (e) {
     log.warn('Targ pokemonów: odczyt nieudany', { error: String(e) });
@@ -162,6 +179,22 @@ async function scanPokemonMarket(tab, {
 
 
 const fmtYen = (n) => `${Number(n).toLocaleString('pl-PL')} ¥`;
+
+const DEAL_KIND = { 'ponizej-skupu': 'poniżej skupu', 'ponizej-typowej': 'poniżej typowej ceny' };
+
+// Alarm o pokemonach wystawionych ponizej rzeczywistej wartosci - kazda
+// oferta raz (wspolny zbior z okazjami przedmiotow; id ofert sie nie
+// pokrywaja, bo to inne tabele, ale prefiks i tak je rozdziela).
+async function notifyPokemonDeals(deals) {
+  const fresh = deals.filter((d) => !notifiedDeals.has(`pok:${d.offer.id}`));
+  if (!fresh.length) return 0;
+  for (const d of fresh) notifiedDeals.add(`pok:${d.offer.id}`);
+  const lines = fresh.slice(0, 10).map((d) =>
+    `- ${d.species} ${d.offer.level} poz., ${d.offer.trainings} tren.${d.offer.shiny ? ', shiny' : ''}: ` +
+    `${fmtYen(d.offer.yenPrice)} - ${DEAL_KIND[d.kind]} (wartość ${fmtYen(d.expected)}, zysk ${fmtYen(d.expected - d.offer.yenPrice)})`);
+  await sendNotification(`PokeBot - pokemony poniżej wartości na targu:\n${lines.join('\n')}`);
+  return fresh.length;
+}
 
 async function notifyNewDeals(deals) {
   const fresh = deals.filter((d) => !notifiedDeals.has(d.offer.id));
@@ -188,6 +221,7 @@ async function ScanMarket(context, {
   notify = true,
   pokemon = true,
   pokemonMaxValue = POKEMON_MAX_VALUE,
+  pokemonPerScan = POKEMON_SPECIES_PER_SCAN,
 } = {}) {
   let tab = null;
   try {
@@ -256,7 +290,9 @@ async function ScanMarket(context, {
       (failed ? `, błędy: ${failed}` : '') +
       (summary.deals.length ? `, okazje: ${summary.deals.length} (obserwowane: ${watchedDeals.length}, nowe zgłoszone: ${notified})` : ''));
     // Targ pokemonow dla gatunkow z Hodowli (marketPokemonEnabled).
-    const pokemonReport = pokemon ? await scanPokemonMarket(tab, { delayMs, maxValue: pokemonMaxValue }) : null;
+    const pokemonReport = pokemon
+      ? await scanPokemonMarket(tab, { delayMs, maxValue: pokemonMaxValue, limit: pokemonPerScan, notify })
+      : null;
     return { ok: true, catalog: catalog.length, summary, pokemonReport };
   } catch (e) {
     log.warn('Targ: odczyt nieudany', { error: String(e) });
@@ -288,6 +324,7 @@ async function runMarketScanIfDue(page, now = Date.now()) {
       scanAll: cfg.marketScanAll !== false,
       pokemon: cfg.marketPokemonEnabled !== false,
       pokemonMaxValue: Number(cfg.marketPokemonMaxValue) > 0 ? Number(cfg.marketPokemonMaxValue) : POKEMON_MAX_VALUE,
+      pokemonPerScan: Number(cfg.marketPokemonPerScan) > 0 ? Number(cfg.marketPokemonPerScan) : POKEMON_SPECIES_PER_SCAN,
       dealRatio: ratio > 0 && ratio < 1 ? ratio : 0.85,
     });
   } finally {
@@ -295,4 +332,4 @@ async function runMarketScanIfDue(page, now = Date.now()) {
   }
 }
 
-module.exports = { ScanMarket, runMarketScanIfDue, SNAPSHOT_DIR, DEFAULT_WATCH };
+module.exports = { ScanMarket, runMarketScanIfDue, SNAPSHOT_DIR, DEFAULT_WATCH, POKEMON_HISTORY_PATH, POKEMON_SALE_PATH };

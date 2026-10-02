@@ -165,6 +165,15 @@ function formatSaleReport(r, now = Date.now()) {
     lines.push('Targ: żaden sprawdzony gatunek nie daje wyraźnie więcej niż skup.');
   }
   lines.push(`Do skupu: ${r.sellToNpc}, brak ofert na targu: ${r.noOffers}, tylko trenowane/shiny: ${r.noComparable}.`);
+  if (r.deals?.length) {
+    const kind = { 'ponizej-skupu': 'poniżej skupu', 'ponizej-typowej': 'poniżej typowej ceny' };
+    lines.push(`Pokemony na targu poniżej wartości (${r.deals.length}):`);
+    for (const d of r.deals.slice(0, 6)) {
+      lines.push(`- ${d.species} ${d.offer.level} poz., ${d.offer.trainings} tren.${d.offer.shiny ? ', shiny' : ''}: ` +
+        `${yen(d.offer.yenPrice)} (${kind[d.kind]}, wartość ${yen(d.expected)})`);
+    }
+  }
+  lines.push('Wykresy cen: panel -> /api/market/wykresy');
   return lines.join('\n');
 }
 

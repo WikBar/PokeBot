@@ -9,7 +9,10 @@ const { REPEL_ITEM_NAMES } = require('./actions/equipment');
 const { validateConfig } = require('./validation/config');
 const { loadJson, RUNTIME_PATH, SHINY_STATS_PATH } = require('./utils/runtimeStore');
 const { summarize } = require('./logic/shinyStats');
-const { SUMMARY_PATH } = require('./utils/marketStore');
+const { SUMMARY_PATH, loadHistory } = require('./utils/marketStore');
+const { renderPokemonChartsPage } = require('./logic/marketChart');
+const POKEMON_HISTORY_PATH = path.resolve(__dirname, '..', 'config', 'pokemon-offers.jsonl');
+const POKEMON_SALE_PATH = path.resolve(__dirname, '..', 'config', 'pokemon-sale.json');
 const CATALOG_PATH = path.resolve(__dirname, '..', 'config', 'market-catalog.json');
 
 const log = logger.child({ module: 'server' });
@@ -26,7 +29,7 @@ const ALLOWED_CONFIG_KEYS = new Set([
   'autoRepelEnabled', 'autoRepelKind', 'autoRepelTier', 'autoRepelMin',
   'saveSafariBall', 'activityMode', 'adventureDelay',
   'shinyHunt', 'shinyHuntTries', 'skippedAdventures', 'strongBallPokemons',
-  'marketScanEnabled', 'marketScanAll', 'marketPokemonEnabled', 'marketPokemonMaxValue', 'marketScanMinutes', 'marketWatchItems', 'marketDealRatio',
+  'marketScanEnabled', 'marketScanAll', 'marketPokemonEnabled', 'marketPokemonMaxValue', 'marketPokemonPerScan', 'marketScanMinutes', 'marketWatchItems', 'marketDealRatio',
   'diff3CatchPokemons', 'diff4CatchPokemons', 'diff5CatchPokemons', 'diff0CatchPokemons'
 ]);
 
@@ -48,6 +51,7 @@ function createApp({ paths = {}, apiKey = process.env.API_KEY || null } = {}) {
     config: CONFIG_PATH, daily: DAILY_PATH, team: TEAM_PATH, locations: LOCATIONS_PATH,
     runtime: RUNTIME_PATH, shinyStats: SHINY_STATS_PATH,
     marketSummary: SUMMARY_PATH, marketCatalog: CATALOG_PATH,
+    pokemonHistory: POKEMON_HISTORY_PATH, pokemonSale: POKEMON_SALE_PATH,
     ...paths,
   };
   const app = express();
@@ -147,6 +151,13 @@ function createApp({ paths = {}, apiKey = process.env.API_KEY || null } = {}) {
       summary: loadJson(P.marketSummary),
       catalog: loadJson(P.marketCatalog)?.items || [],
     });
+  });
+
+  // Historia cen pokemonow na targu: wykresy i okazje (strona HTML).
+  app.get('/api/market/wykresy', (req, res) => {
+    const records = loadHistory(P.pokemonHistory);
+    const deals = loadJson(P.pokemonSale)?.deals || [];
+    res.type('html').send(renderPokemonChartsPage({ records, deals }));
   });
 
   app.get('/api/daily', async (req, res) => {

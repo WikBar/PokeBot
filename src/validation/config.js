@@ -32,6 +32,7 @@ const NUMBER_RULES = [
   ['marketScanMinutes', 15, Infinity, false, false],
   ['marketDealRatio', 0.05, 0.99, false, false],
   ['marketPokemonMaxValue', 1, Infinity, false, false],
+  ['marketPokemonPerScan', 1, 700, true, false],
 ];
 
 const BOOL_KEYS = [

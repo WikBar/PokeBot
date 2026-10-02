@@ -12,3 +12,4 @@ config/market-scans.jsonl
 config/market-summary.json
 config/pokemon-market.json
 config/pokemon-sale.json
+config/pokemon-offers.jsonl
