@@ -146,6 +146,9 @@ function formatSaleReport(r, now = Date.now()) {
     `Hodowla (analiza ${ago} min temu): ${r.pokemon} pokemonów, ${r.species} gatunków, skup razem ${yen(r.totalValue)}.`,
     `Sprawdzone na targu: ${r.checked}/${r.species} gatunków.`,
   ];
+  if (r.excluded?.count) {
+    lines.push(`Pominięte (skup powyżej ${yen(r.excluded.maxValue)}): ${r.excluded.count}.`);
+  }
   if (r.pokemonOfDay?.length) {
     lines.push(`Pokemon Dnia (+140% skupu, jeśli złapany dziś): ${r.pokemonOfDay.map((p) => `${p.name} ×${p.count}`).join(', ')}`);
   }

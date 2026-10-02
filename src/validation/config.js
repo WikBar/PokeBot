@@ -31,6 +31,7 @@ const NUMBER_RULES = [
   ['shinyHuntTries', 1, Infinity, true, false],
   ['marketScanMinutes', 15, Infinity, false, false],
   ['marketDealRatio', 0.05, 0.99, false, false],
+  ['marketPokemonMaxValue', 1, Infinity, false, false],
 ];
 
 const BOOL_KEYS = [

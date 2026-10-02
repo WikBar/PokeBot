@@ -99,3 +99,16 @@ test('analyzeHodowla + /sprzedaz', () => {
   assert.match(text, /- Typhlosion 80 poz\.: targ ~699\s999 ¥ vs skup 400\s000 ¥/);
   assert.match(formatSaleReport(null), /Brak analizy Hodowli/);
 });
+
+test('/sprzedaz: informacja o pominietych drogich egzemplarzach', () => {
+  const now = Date.parse('2026-10-02T12:00:00Z');
+  const cheap = mine.filter((p) => p.value <= 800000);
+  const report = {
+    updatedAt: new Date(now).toISOString(),
+    excluded: { count: mine.length - cheap.length, maxValue: 800000 },
+    ...analyzeHodowla(cheap, {}),
+  };
+  assert.equal(report.pokemon, 5);
+  assert.deepEqual(report.highValue, []);   // Prinplup za 25 mln odfiltrowany
+  assert.match(formatSaleReport(report, now), /Pominięte \(skup powyżej 800\s000 ¥\): 1\./);
+});

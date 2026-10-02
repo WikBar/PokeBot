@@ -104,20 +104,27 @@ const POKEMON_SALE_PATH = path.resolve(__dirname, '..', '..', 'config', 'pokemon
 // Gatunkow na jeden odczyt (najcenniejsze najpierw); cala Hodowla (~600
 // gatunkow) obrocona w ok. 10 odczytow. Wynik gatunku wazny 24 h.
 const POKEMON_SPECIES_PER_SCAN = 60;
+// Domyslny prog wartosci skupu (marketPokemonMaxValue w configu).
+const POKEMON_MAX_VALUE = 800000;
 
 // Hodowla + oferty kolejnej porcji gatunkow + raport, co sprzedac.
 // Nigdy nie rzuca - zwraca raport albo null.
 async function scanPokemonMarket(tab, {
   cachePath = POKEMON_MARKET_PATH, reportPath = POKEMON_SALE_PATH,
   limit = POKEMON_SPECIES_PER_SCAN, delayMs = REQUEST_DELAY_MS,
+  maxValue = POKEMON_MAX_VALUE,
 } = {}) {
   try {
     const hodowlaHtml = await fetchHtml(tab, new URL(HODOWLA_URL, tab.url()).toString());
-    const hodowla = parseHodowla(hodowlaHtml);
-    if (!hodowla.length) {
+    const all = parseHodowla(hodowlaHtml);
+    if (!all.length) {
       log.warn('Targ pokemonów: nie rozpoznano Hodowli - pomijam.');
       return null;
     }
+    // Tylko pokemony o skupie do maxValue (marketPokemonMaxValue) - drozsze
+    // egzemplarze nie sa analizowane ani szukane na targu.
+    const hodowla = all.filter((p) => (p.value || 0) <= maxValue);
+    const excluded = { count: all.length - hodowla.length, maxValue };
     const pokemonOfDay = parsePokemonOfDay(hodowlaHtml);
     const cache = loadJson(cachePath)?.species || {};
     const now = Date.now();
@@ -142,7 +149,7 @@ async function scanPokemonMarket(tab, {
     }
     await saveToFile(cachePath, { updatedAt: new Date(now).toISOString(), species: cache });
 
-    const report = { updatedAt: new Date(now).toISOString(), pokemonOfDay, ...analyzeHodowla(hodowla, cache, { pokemonOfDay }) };
+    const report = { updatedAt: new Date(now).toISOString(), pokemonOfDay, excluded, ...analyzeHodowla(hodowla, cache, { pokemonOfDay }) };
     await saveToFile(reportPath, report);
     log.info(`Targ pokemonów: sprawdzono ${checked} gatunków (łącznie ${report.checked}/${report.species}), ` +
       `opłaca się targ: ${report.market.length}, do skupu: ${report.sellToNpc}.`);
@@ -180,6 +187,7 @@ async function ScanMarket(context, {
   delayMs = REQUEST_DELAY_MS,
   notify = true,
   pokemon = true,
+  pokemonMaxValue = POKEMON_MAX_VALUE,
 } = {}) {
   let tab = null;
   try {
@@ -248,7 +256,7 @@ async function ScanMarket(context, {
       (failed ? `, błędy: ${failed}` : '') +
       (summary.deals.length ? `, okazje: ${summary.deals.length} (obserwowane: ${watchedDeals.length}, nowe zgłoszone: ${notified})` : ''));
     // Targ pokemonow dla gatunkow z Hodowli (marketPokemonEnabled).
-    const pokemonReport = pokemon ? await scanPokemonMarket(tab, { delayMs }) : null;
+    const pokemonReport = pokemon ? await scanPokemonMarket(tab, { delayMs, maxValue: pokemonMaxValue }) : null;
     return { ok: true, catalog: catalog.length, summary, pokemonReport };
   } catch (e) {
     log.warn('Targ: odczyt nieudany', { error: String(e) });
@@ -279,6 +287,7 @@ async function runMarketScanIfDue(page, now = Date.now()) {
       // Przeglad calego katalogu; marketScanAll=false - tylko obserwowane.
       scanAll: cfg.marketScanAll !== false,
       pokemon: cfg.marketPokemonEnabled !== false,
+      pokemonMaxValue: Number(cfg.marketPokemonMaxValue) > 0 ? Number(cfg.marketPokemonMaxValue) : POKEMON_MAX_VALUE,
       dealRatio: ratio > 0 && ratio < 1 ? ratio : 0.85,
     });
   } finally {
