@@ -9,10 +9,13 @@ async function login(page, { login: loginName, password }) {
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
       await page.goto(LOGIN_URL);
-      await page.fill('input[name="login"]', loginName);
-      await page.fill('input[name="haslo"]', password);
+      // Strona logowania ma dwa formularze login/haslo (jeden ukryty) -
+      // wypelniamy tylko widoczny, inaczej fill czeka 30 s na ukryte pole.
+      const form = page.locator('form:has(input[name="haslo"]:visible)').first();
+      await form.locator('input[name="login"]').fill(loginName);
+      await form.locator('input[name="haslo"]').fill(password);
       await Promise.all([
-        page.click('button[type="submit"]'),
+        form.locator('button[type="submit"], input[type="submit"]').first().click(),
         page.waitForLoadState('networkidle'),
       ]);
 
@@ -21,14 +24,15 @@ async function login(page, { login: loginName, password }) {
         log.info(`Zalogowano pomyślnie ${loginName} za ${attempt} próbą`);
         return true;
       }
-      log.warn('Próba logowania nieudana', { attempt, maxRetries: MAX_RETRIES });
-      if (attempt < MAX_RETRIES) {
-        await page.waitForTimeout(2000);
-        await page.reload();
-      }
+      // Komunikat gry (np. blokada po zbyt wielu logowaniach) - do diagnozy.
+      const message = await page.locator('.alert:visible').first().innerText({ timeout: 2000 }).catch(() => '');
+      log.warn('Próba logowania nieudana', { attempt, maxRetries: MAX_RETRIES, url: page.url(), message: message.trim().slice(0, 200) });
     } catch (error) {
       log.error('Błąd podczas logowania', { attempt, error: String(error) });
     }
+    // Przerwa rosnie z kazda proba - szybkie ponawianie moglo pogarszac
+    // blokade logowania.
+    if (attempt < MAX_RETRIES) await page.waitForTimeout(attempt * 15000);
   }
   log.error('Logowanie nieudane po wszystkich próbach', { login: loginName });
   return false;
