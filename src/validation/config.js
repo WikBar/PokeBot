@@ -139,6 +139,11 @@ function validateConfig(cfg, locations, team = null) {
     }
   }
 
+  if (cfg.marketWatchItems !== undefined
+    && (!Array.isArray(cfg.marketWatchItems) || cfg.marketWatchItems.some((x) => typeof x !== 'string'))) {
+    errors.push('marketWatchItems: musi być listą kodów przedmiotów (np. "ultraballe")');
+  }
+
   // Listy pokemonow.
   const lists = {};
   for (const key of LIST_KEYS) {
