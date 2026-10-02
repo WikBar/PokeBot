@@ -26,7 +26,7 @@ const ALLOWED_CONFIG_KEYS = new Set([
   'autoRepelEnabled', 'autoRepelKind', 'autoRepelTier', 'autoRepelMin',
   'saveSafariBall', 'activityMode', 'adventureDelay',
   'shinyHunt', 'shinyHuntTries', 'skippedAdventures', 'strongBallPokemons',
-  'marketScanEnabled', 'marketScanAll', 'marketScanMinutes', 'marketWatchItems', 'marketDealRatio',
+  'marketScanEnabled', 'marketScanAll', 'marketPokemonEnabled', 'marketScanMinutes', 'marketWatchItems', 'marketDealRatio',
   'diff3CatchPokemons', 'diff4CatchPokemons', 'diff5CatchPokemons', 'diff0CatchPokemons'
 ]);
 

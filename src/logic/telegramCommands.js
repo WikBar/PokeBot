@@ -9,6 +9,7 @@ const COMMANDS = {
   shiny: ['/shiny'],
   report: ['/raport', '/report'],
   market: ['/targ', '/market'],
+  sale: ['/sprzedaz', '/sprzedaż', '/sale'],
   help: ['/pomoc', '/help', '/start'],
 };
 
@@ -34,6 +35,7 @@ const HELP = [
   '/raport - anomalie z logów (24 h)',
   '/targ - przegląd targu: obserwowane, okazje',
   '/targ <nazwa> - ceny konkretnego przedmiotu, np. /targ rawst',
+  '/sprzedaz - co sprzedać z Hodowli: skup czy targ',
 ].join('\n');
 
 const minutesAgo = (iso, now) => {
@@ -134,3 +136,33 @@ function formatMarket(summary, now = Date.now(), query = '') {
 }
 
 module.exports = { COMMANDS, HELP, parseCommand, formatStatus, formatShiny, formatReport, formatMarket };
+
+// Raport "co sprzedac z Hodowli" (config/pokemon-sale.json,
+// logic/pokemonSale.analyzeHodowla).
+function formatSaleReport(r, now = Date.now()) {
+  if (!r?.species) return 'Brak analizy Hodowli - bot sprawdza targ pokemonów podczas treningu i opieki.';
+  const ago = Math.round((now - Date.parse(r.updatedAt)) / 60000);
+  const lines = [
+    `Hodowla (analiza ${ago} min temu): ${r.pokemon} pokemonów, ${r.species} gatunków, skup razem ${yen(r.totalValue)}.`,
+    `Sprawdzone na targu: ${r.checked}/${r.species} gatunków.`,
+  ];
+  if (r.pokemonOfDay?.length) {
+    lines.push(`Pokemon Dnia (+140% skupu, jeśli złapany dziś): ${r.pokemonOfDay.map((p) => `${p.name} ×${p.count}`).join(', ')}`);
+  }
+  if (r.highValue?.length) {
+    lines.push('Wyjątkowo cenne egzemplarze - sprawdź ręcznie przed sprzedażą:');
+    for (const p of r.highValue.slice(0, 6)) lines.push(`- ${p.name} ${p.level} poz.: skup ${yen(p.value)}`);
+  }
+  if (r.market?.length) {
+    lines.push('Lepiej na targu niż w skupie (trzeba przenieść do rezerwy):');
+    for (const s of r.market.slice(0, 8)) {
+      lines.push(`- ${s.name} ${s.best.level} poz.: targ ~${yen(s.suggestedPrice)} vs skup ${yen(s.best.value)} (+${yen(s.gainPerPokemon)}, ${s.market.comparable} ofert)`);
+    }
+  } else {
+    lines.push('Targ: żaden sprawdzony gatunek nie daje wyraźnie więcej niż skup.');
+  }
+  lines.push(`Do skupu: ${r.sellToNpc}, brak ofert na targu: ${r.noOffers}, tylko trenowane/shiny: ${r.noComparable}.`);
+  return lines.join('\n');
+}
+
+module.exports.formatSaleReport = formatSaleReport;

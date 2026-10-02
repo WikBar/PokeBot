@@ -10,3 +10,5 @@ config/shiny-stats.json
 config/market-catalog.json
 config/market-scans.jsonl
 config/market-summary.json
+config/pokemon-market.json
+config/pokemon-sale.json

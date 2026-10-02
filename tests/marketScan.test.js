@@ -49,6 +49,7 @@ test('ScanMarket: katalog, oferty przez fetch, historia, podsumowanie; glowna ka
       scanAll: false,
       delayMs: 0,
       notify: false,
+      pokemon: false,
     };
     const result = await ScanMarket(context, opts);
     assert.equal(result.ok, true);

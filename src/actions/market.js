@@ -6,6 +6,9 @@ const { sendNotification } = require('../utils/notifier');
 const { parseCatalog, parseItemOffers, parseOffersPaging, parseOffersPage } = require('../logic/marketParse');
 const { buildMarketSummary, scanRecords } = require('../logic/market');
 const marketStore = require('../utils/marketStore');
+const { loadJson } = require('../utils/runtimeStore');
+const { parseHodowla, parsePokemonOfDay, parsePokemonOffers } = require('../logic/pokemonParse');
+const { groupBySpecies, speciesToCheck, analyzeHodowla } = require('../logic/pokemonSale');
 
 const log = logger.child({ module: 'market' });
 
@@ -89,6 +92,68 @@ async function fetchItemOffers(tab, item, { maxPages = WATCH_PAGES, delayMs = 0 
   return { offers, html: lastHtml, pages: paging.totalPages };
 }
 
+// Targ pokemonow to wyszukiwarka - oferty jednego gatunku. Same GET-y
+// widokow; przyciski kupna (targ_pok.php?yeny&kup=...) nigdy nie sa
+// pobierane.
+const POKEMON_SEARCH = (name) => 'gra/targ_pok.php?oferty=&sz=&nazwa_pokemona=' + encodeURIComponent(name) +
+  '&id_pokemona=&poziom_min=&poziom_max=100&tren_max=&cena_min=&cena_max=&cena_r=yeny' +
+  '&min_bazowy_dx=&min_obecny_dx=&region=0&typ=0&shiny=l';
+const HODOWLA_URL = 'gra/hodowla.php?wszystkie';
+const POKEMON_MARKET_PATH = path.resolve(__dirname, '..', '..', 'config', 'pokemon-market.json');
+const POKEMON_SALE_PATH = path.resolve(__dirname, '..', '..', 'config', 'pokemon-sale.json');
+// Gatunkow na jeden odczyt (najcenniejsze najpierw); cala Hodowla (~600
+// gatunkow) obrocona w ok. 10 odczytow. Wynik gatunku wazny 24 h.
+const POKEMON_SPECIES_PER_SCAN = 60;
+
+// Hodowla + oferty kolejnej porcji gatunkow + raport, co sprzedac.
+// Nigdy nie rzuca - zwraca raport albo null.
+async function scanPokemonMarket(tab, {
+  cachePath = POKEMON_MARKET_PATH, reportPath = POKEMON_SALE_PATH,
+  limit = POKEMON_SPECIES_PER_SCAN, delayMs = REQUEST_DELAY_MS,
+} = {}) {
+  try {
+    const hodowlaHtml = await fetchHtml(tab, new URL(HODOWLA_URL, tab.url()).toString());
+    const hodowla = parseHodowla(hodowlaHtml);
+    if (!hodowla.length) {
+      log.warn('Targ pokemonów: nie rozpoznano Hodowli - pomijam.');
+      return null;
+    }
+    const pokemonOfDay = parsePokemonOfDay(hodowlaHtml);
+    const cache = loadJson(cachePath)?.species || {};
+    const now = Date.now();
+    const todo = speciesToCheck(groupBySpecies(hodowla), cache, { limit, now });
+
+    let checked = 0;
+    for (const name of todo) {
+      try {
+        if (delayMs) await sleep(delayMs);
+        const searchHtml = await fetchHtml(tab, new URL(POKEMON_SEARCH(name), tab.url()).toString());
+        const paging = parseOffersPaging(searchHtml);
+        let offers = [];
+        if (paging) {
+          if (delayMs) await sleep(delayMs);
+          offers = parsePokemonOffers(await fetchHtml(tab, new URL(paging.pageUrl(1), tab.url()).toString()));
+        }
+        cache[name] = { ts: now, offers, pages: paging?.totalPages || 0 };
+        checked++;
+      } catch (e) {
+        log.warn(`Targ pokemonów: nie udało się sprawdzić ${name}`, { error: String(e) });
+      }
+    }
+    await saveToFile(cachePath, { updatedAt: new Date(now).toISOString(), species: cache });
+
+    const report = { updatedAt: new Date(now).toISOString(), pokemonOfDay, ...analyzeHodowla(hodowla, cache, { pokemonOfDay }) };
+    await saveToFile(reportPath, report);
+    log.info(`Targ pokemonów: sprawdzono ${checked} gatunków (łącznie ${report.checked}/${report.species}), ` +
+      `opłaca się targ: ${report.market.length}, do skupu: ${report.sellToNpc}.`);
+    return report;
+  } catch (e) {
+    log.warn('Targ pokemonów: odczyt nieudany', { error: String(e) });
+    return null;
+  }
+}
+
+
 const fmtYen = (n) => `${Number(n).toLocaleString('pl-PL')} ¥`;
 
 async function notifyNewDeals(deals) {
@@ -114,6 +179,7 @@ async function ScanMarket(context, {
   dealRatio = 0.85,
   delayMs = REQUEST_DELAY_MS,
   notify = true,
+  pokemon = true,
 } = {}) {
   let tab = null;
   try {
@@ -181,7 +247,9 @@ async function ScanMarket(context, {
       `${Math.round((now - started) / 1000)} s` +
       (failed ? `, błędy: ${failed}` : '') +
       (summary.deals.length ? `, okazje: ${summary.deals.length} (obserwowane: ${watchedDeals.length}, nowe zgłoszone: ${notified})` : ''));
-    return { ok: true, catalog: catalog.length, summary };
+    // Targ pokemonow dla gatunkow z Hodowli (marketPokemonEnabled).
+    const pokemonReport = pokemon ? await scanPokemonMarket(tab, { delayMs }) : null;
+    return { ok: true, catalog: catalog.length, summary, pokemonReport };
   } catch (e) {
     log.warn('Targ: odczyt nieudany', { error: String(e) });
     return { ok: false, error: String(e) };
@@ -210,6 +278,7 @@ async function runMarketScanIfDue(page, now = Date.now()) {
       watch,
       // Przeglad calego katalogu; marketScanAll=false - tylko obserwowane.
       scanAll: cfg.marketScanAll !== false,
+      pokemon: cfg.marketPokemonEnabled !== false,
       dealRatio: ratio > 0 && ratio < 1 ? ratio : 0.85,
     });
   } finally {

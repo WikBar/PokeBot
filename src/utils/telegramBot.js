@@ -10,13 +10,14 @@ const { logger } = require('./logger');
 const state = require('../state');
 const { sendViaTelegram, getTelegramConfig } = require('./notifier');
 const {
-  HELP, parseCommand, formatStatus, formatShiny, formatReport, formatMarket,
+  HELP, parseCommand, formatStatus, formatShiny, formatReport, formatMarket, formatSaleReport,
 } = require('../logic/telegramCommands');
 const { analyzeLogs } = require('../logic/logAnalysis');
 const { summarize } = require('../logic/shinyStats');
 const { listLogFiles, readEntries } = require('./logReader');
 const { loadJson, RUNTIME_PATH, SHINY_STATS_PATH } = require('./runtimeStore');
 const { loadSummary } = require('./marketStore');
+const POKEMON_SALE_PATH = require('path').resolve(__dirname, '..', '..', 'config', 'pokemon-sale.json');
 
 const log = logger.child({ module: 'telegram' });
 const API = 'https://api.telegram.org';
@@ -63,6 +64,8 @@ function respond(command, args = '') {
     }
     case 'market':
       return formatMarket(loadSummary(), Date.now(), args);
+    case 'sale':
+      return formatSaleReport(loadJson(POKEMON_SALE_PATH));
     case 'help':
       return HELP;
     default:

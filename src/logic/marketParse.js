@@ -94,7 +94,9 @@ function parseItemOffers(html) {
 //     $('#targ_prz_oferty').load("gra/targ_prz.php?oferty_strona&&przedmiot=rawst_berry&value587&strona="+page);
 // Zwraca { totalPages, pageUrl(n) } albo null, gdy skryptu nie ma.
 function parseOffersPaging(html) {
-  const load = html.match(/#targ_prz_oferty'\)\.load\(\s*["']([^"']+strona=)["']\s*\+\s*page/);
+  // Ten sam mechanizm na targu przedmiotow (#targ_prz_oferty) i pokemonow
+  // (#targ_pok_oferty).
+  const load = html.match(/#targ_\w+_oferty'\)\.load\(\s*["']([^"']+strona=)["']\s*\+\s*page/);
   if (!load) return null;
   const totalPages = Number((html.match(/totalPages:\s*(\d+)/) || [])[1]) || 1;
   const base = decode(load[1]);

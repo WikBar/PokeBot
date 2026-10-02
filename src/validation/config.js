@@ -35,7 +35,7 @@ const NUMBER_RULES = [
 
 const BOOL_KEYS = [
   'randomAdventure', 'limitsEnabled', 'autoRepelEnabled', 'saveSafariBall', 'shinyHunt',
-  'marketScanEnabled', 'marketScanAll',
+  'marketScanEnabled', 'marketScanAll', 'marketPokemonEnabled',
 ];
 
 const ENUM_RULES = [
