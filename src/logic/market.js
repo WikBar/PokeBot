@@ -126,4 +126,34 @@ function planPurchases(deals, { budget = 0, balance = Infinity, reserve = 0, max
   return plan;
 }
 
-module.exports = { normalizeItem, priceStats, findDeals, suggestSellPrice, planPurchases };
+// Podsumowanie po odczycie targu - dla /targ, panelu i alarmow.
+// offersByItem: { kod: [oferty z parseItemOffers] } (aktualny odczyt),
+// names: { kod: nazwa z katalogu }, history: obserwacje z historii
+// (lacznie z aktualnym odczytem).
+function buildMarketSummary({ offersByItem, names = {}, history, now = Date.now(), dealRatio = 0.7 }) {
+  const stats = priceStats(history, { now });
+  const items = [];
+  const deals = [];
+  for (const [code, offers] of Object.entries(offersByItem)) {
+    const priced = offers.filter((o) => o.unitPrice > 0);
+    const s = stats.get(normalizeItem(code)) || null;
+    const lowest = priced.length ? Math.min(...priced.map((o) => o.unitPrice)) : null;
+    const itemDeals = findDeals(priced, stats, { ratio: dealRatio });
+    deals.push(...itemDeals.map((d) => ({ ...d, name: names[code] || code })));
+    items.push({
+      code,
+      name: names[code] || code,
+      offers: offers.length,
+      lowest,
+      supply: priced.reduce((sum, o) => sum + (o.quantity || 0), 0),
+      median: s?.median ?? null,
+      p25: s?.p25 ?? null,
+      trend: s?.trend ?? null,
+      historyOffers: s?.offers ?? 0,
+      suggestedSell: suggestSellPrice(code, priced, stats),
+    });
+  }
+  return { updatedAt: new Date(now).toISOString(), items, deals };
+}
+
+module.exports = { normalizeItem, priceStats, findDeals, suggestSellPrice, planPurchases, buildMarketSummary };

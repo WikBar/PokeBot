@@ -62,3 +62,27 @@ test('planPurchases: budzet, rezerwa, limit sztuk i posiadane', () => {
   const tight = planPurchases(deals, { budget: 3000, balance: 1200, reserve: 1000, maxPerItem: { Ultraballe: 100 } });
   assert.deepEqual(tight.map((p) => [p.offer.id, p.quantity]), [[1, 4]]);
 });
+
+const { buildMarketSummary } = require('../src/logic/market');
+const { formatMarket } = require('../src/logic/telegramCommands');
+
+test('buildMarketSummary: najnizsza cena, podaz, mediana, okazje z nazwa', () => {
+  const offersByItem = {
+    ultraballe: [
+      { id: 20, item: 'ultraballe', unitPrice: 60, quantity: 5 },
+      { id: 21, item: 'ultraballe', unitPrice: 100, quantity: 7 },
+      { id: 22, item: 'ultraballe', unitPrice: null, meritPrice: 3, quantity: 9 },
+    ],
+  };
+  const hist = history.filter((o) => o.item === 'Ultraballe').map((o) => ({ ...o, item: 'ultraballe' }));
+  const s = buildMarketSummary({ offersByItem, names: { ultraballe: 'Ultraballe' }, history: hist, now: NOW });
+  const u = s.items[0];
+  assert.deepEqual([u.name, u.offers, u.lowest, u.supply, u.median], ['Ultraballe', 3, 60, 12, 103]);
+  assert.equal(s.deals.length, 1);
+  assert.equal(s.deals[0].name, 'Ultraballe');
+  const text = formatMarket(s, NOW + 5 * 60000);
+  assert.match(text, /odczyt 5 min temu/);
+  assert.match(text, /Ultraballe: od 60 ¥ \(3 ofert\), mediana 103 ¥/);
+  assert.match(text, /Okazje:\n- Ultraballe: 60 ¥ × 5 \(58% mediany\)/);
+  assert.match(formatMarket(null), /Brak danych z targu/);
+});

@@ -10,12 +10,13 @@ const { logger } = require('./logger');
 const state = require('../state');
 const { sendViaTelegram, getTelegramConfig } = require('./notifier');
 const {
-  HELP, parseCommand, formatStatus, formatShiny, formatReport,
+  HELP, parseCommand, formatStatus, formatShiny, formatReport, formatMarket,
 } = require('../logic/telegramCommands');
 const { analyzeLogs } = require('../logic/logAnalysis');
 const { summarize } = require('../logic/shinyStats');
 const { listLogFiles, readEntries } = require('./logReader');
 const { loadJson, RUNTIME_PATH, SHINY_STATS_PATH } = require('./runtimeStore');
+const { loadSummary } = require('./marketStore');
 
 const log = logger.child({ module: 'telegram' });
 const API = 'https://api.telegram.org';
@@ -59,6 +60,8 @@ function respond(command) {
       const { entries, nullBytes } = readEntries(listLogFiles(since));
       return formatReport(analyzeLogs(entries, { since, nullBytes }));
     }
+    case 'market':
+      return formatMarket(loadSummary());
     case 'help':
       return HELP;
     default:

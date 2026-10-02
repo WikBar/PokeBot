@@ -45,10 +45,46 @@ function parseCatalog(html) {
   return items;
 }
 
-// Lista ofert jednego przedmiotu. Do czasu poznania struktury tej strony
-// zwraca null - skaner zapisuje wtedy strone do logs/market/.
-function parseItemOffers(_html) {
-  return null;
+// "30.000&nbsp;¥" -> 30000; "-----" (brak ceny w tej walucie) -> null.
+function parsePrice(text) {
+  const digits = stripTags(text).replace(/[^\d]/g, '');
+  return digits ? parseInt(digits, 10) : null;
+}
+
+// Lista ofert jednego przedmiotu (strona po kliknieciu w katalogu).
+// Kazda oferta to:
+//   <form class="tr" action="targ_prz.php?szukaj&przedmiot=rawst_berry">
+//     <span class="td"><img ...></span>
+//     <span class="td">3569</span>                 ilosc
+//     <span class="td">30.000&nbsp;¥</span>         cena za sztuke w Yenach
+//     <span class="td">-----</span>                 cena w zaslugach (§)
+//     ... <strong>Sprzedawca</strong> ...
+//     <input type="hidden" name="id_oferty" value="3961166">
+// Zwraca [{ id, item, quantity, unitPrice, meritPrice, seller }] albo null,
+// gdy to nie jest strona ofert (np. zmienil sie wyglad gry).
+// unitPrice = cena w ¥ (null, gdy oferta tylko za zaslugi).
+function parseItemOffers(html) {
+  if (!/<h2>\s*Oferty\s*<\/h2>/i.test(html) && !/name="id_oferty"/.test(html)) return null;
+
+  const offers = [];
+  const formRe = /<form class="tr"[^>]*action="([^"]*)"[^>]*>([\s\S]*?)<\/form>/g;
+  let m;
+  while ((m = formRe.exec(html))) {
+    const action = decode(m[1]);
+    const body = m[2];
+    const cells = [...body.matchAll(/<span class="td[^"]*">([\s\S]*?)<\/span>/g)].map((c) => c[1]);
+    const id = (body.match(/name="id_oferty" value="(\d+)"/) || [])[1];
+    if (!id || cells.length < 4) continue;
+    offers.push({
+      id: Number(id),
+      item: (action.match(/przedmiot=([\w-]+)/) || [])[1] || null,
+      quantity: parsePrice(cells[1]),
+      unitPrice: parsePrice(cells[2]),
+      meritPrice: parsePrice(cells[3]),
+      seller: stripTags((body.match(/<strong>([\s\S]*?)<\/strong>/) || [])[1] || '') || null,
+    });
+  }
+  return offers;
 }
 
 module.exports = { parseCatalog, parseItemOffers, stripTags };

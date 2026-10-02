@@ -2,7 +2,10 @@ const fs = require('fs');
 const path = require('path');
 const { logger } = require('../utils/logger');
 const { loadFromFile, saveToFile } = require('../utils/fileOperations');
+const { sendNotification } = require('../utils/notifier');
 const { parseCatalog, parseItemOffers } = require('../logic/marketParse');
+const { buildMarketSummary } = require('../logic/market');
+const marketStore = require('../utils/marketStore');
 
 const log = logger.child({ module: 'market' });
 
@@ -27,13 +30,14 @@ const MAX_ITEMS_PER_SCAN = 8;
 
 let lastScanAt = 0;
 let scanning = false;
+// Okazje juz zgloszone na Telegram (id oferty) - kazda tylko raz.
+const notifiedDeals = new Set();
 
 function saveSnapshot(name, html, dir = SNAPSHOT_DIR) {
   fs.mkdirSync(dir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const file = path.join(dir, `${name}-${stamp}.html`);
   fs.writeFileSync(file, html, 'utf8');
-  // Trzymamy tylko kilka ostatnich - to material do budowy parsera.
   const old = fs.readdirSync(dir).filter((f) => f.startsWith(`${name}-`)).sort();
   for (const f of old.slice(0, Math.max(0, old.length - KEEP_SNAPSHOTS))) {
     fs.unlinkSync(path.join(dir, f));
@@ -47,37 +51,54 @@ async function openViaMenu(page, menuText, itemText) {
   await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
 }
 
-// Otwiera oferty jednego przedmiotu: katalog -> zakladka -> przycisk.
-// Przyciski laduja sie przez AJAX (btn-akcja), wiec katalog otwieramy od
-// nowa dla kazdego przedmiotu.
-async function openItemOffers(tab, item) {
-  await openViaMenu(tab, 'Targ', 'Kup - Przedmioty');
-  const pane = item.href.match(/zakladka=(\d+)/)?.[1];
-  const tabLink = tab.locator('ul.nav-tabs a[href^="#targ_kupprz-"]').nth(Number(pane) || 0);
-  if (await tabLink.count()) await tabLink.click().catch(() => {});
-  await tab.locator(`button.btn-akcja[href*="przedmiot=${item.code}&"]`).first().click({ timeout: 15000 });
-  await tab.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
-  await tab.waitForTimeout(1000);
-  return tab.content();
+// Oferty jednego przedmiotu: pobieramy strone, ktora laduje przycisk
+// w katalogu (gra/targ_prz.php?szukaj&przedmiot=...), zwyklym fetch z karty
+// gry - z ciasteczkami sesji, bez klikania w zakladki.
+async function fetchItemOffersHtml(tab, item) {
+  const url = new URL(item.href, new URL('gra/', tab.url())).toString();
+  return tab.evaluate(async (u) => {
+    const res = await fetch(u, { credentials: 'include', headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.text();
+  }, url);
+}
+
+const fmtYen = (n) => `${Number(n).toLocaleString('pl-PL')} ¥`;
+
+async function notifyNewDeals(deals) {
+  const fresh = deals.filter((d) => !notifiedDeals.has(d.offer.id));
+  if (!fresh.length) return 0;
+  for (const d of fresh) notifiedDeals.add(d.offer.id);
+  const lines = fresh.slice(0, 10).map((d) =>
+    `- ${d.name}: ${fmtYen(d.offer.unitPrice)} × ${d.offer.quantity} (${Math.round(d.ratio * 100)}% mediany ${fmtYen(d.median)}), sprzedawca ${d.offer.seller || '?'}`);
+  await sendNotification(`PokeBot - okazje na targu:\n${lines.join('\n')}`);
+  return fresh.length;
 }
 
 // Jeden odczyt targu w osobnej karcie. Nigdy nie rzuca - blad targu nie moze
-// zatrzymac bota. url/snapshotDir/catalogPath podmieniaja testy.
+// zatrzymac bota. Sciezki i url podmieniaja testy.
 async function ScanMarket(context, {
-  url = GAME_URL, snapshotDir = SNAPSHOT_DIR, catalogPath = CATALOG_PATH, watch = DEFAULT_WATCH,
+  url = GAME_URL,
+  snapshotDir = SNAPSHOT_DIR,
+  catalogPath = CATALOG_PATH,
+  historyPath = marketStore.HISTORY_PATH,
+  summaryPath = marketStore.SUMMARY_PATH,
+  watch = DEFAULT_WATCH,
+  dealRatio = 0.7,
+  notify = true,
 } = {}) {
   let tab = null;
   try {
     tab = await context.newPage();
     await tab.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
     await openViaMenu(tab, 'Targ', 'Kup - Przedmioty');
-    const catalog = parseCatalog(await tab.content());
+    const catalogHtml = await tab.content();
+    const catalog = parseCatalog(catalogHtml);
     if (catalog.length === 0) {
-      saveSnapshot('kup-przedmioty', await tab.content(), snapshotDir);
+      saveSnapshot('kup-przedmioty', catalogHtml, snapshotDir);
       log.warn('Targ: nie rozpoznano katalogu przedmiotów - zapisano stronę.');
       return { ok: false, error: 'pusty katalog' };
     }
-    // Katalog do podgladu w panelu / wyboru kodow do marketWatchItems.
     await saveToFile(catalogPath, { updatedAt: new Date().toISOString(), items: catalog });
 
     const wanted = new Set(watch.map((c) => String(c).trim().toLowerCase()));
@@ -85,26 +106,40 @@ async function ScanMarket(context, {
     const unknown = [...wanted].filter((c) => !catalog.some((i) => i.code === c));
     if (unknown.length) log.warn(`Targ: nieznane kody w marketWatchItems: ${unknown.join(', ')}`);
 
-    const results = [];
+    const now = Date.now();
+    const offersByItem = {};
+    const names = {};
     for (const item of items) {
+      names[item.code] = item.name;
       try {
-        const html = await openItemOffers(tab, item);
+        const html = await fetchItemOffersHtml(tab, item);
         const offers = parseItemOffers(html);
         if (offers === null) {
+          // Gra zmienila wyglad strony ofert - zapis do analizy.
           saveSnapshot(`oferty-${item.code}`, html, snapshotDir);
-          results.push({ item: item.code, offers: null });
-        } else {
-          results.push({ item: item.code, offers });
+          log.warn(`Targ: nie rozpoznano ofert ${item.name} - zapisano stronę.`);
+          continue;
         }
+        offersByItem[item.code] = offers;
       } catch (e) {
-        log.warn(`Targ: nie udało się otworzyć ofert ${item.name}`, { error: String(e) });
-        results.push({ item: item.code, error: String(e) });
+        log.warn(`Targ: nie udało się pobrać ofert ${item.name}`, { error: String(e) });
       }
     }
-    const pending = results.filter((r) => r.offers === null).map((r) => r.item);
-    log.info(`Targ: katalog ${catalog.length} przedmiotów, sprawdzono ${results.length}` +
-      (pending.length ? ` (parser ofert jeszcze nie gotowy - zapisano strony: ${pending.join(', ')})` : '.'));
-    return { ok: true, catalog: catalog.length, results };
+
+    // Historia: kazda oferta z cena w ¥ jako obserwacja z tego odczytu.
+    const observations = Object.values(offersByItem).flat()
+      .filter((o) => o.unitPrice > 0)
+      .map((o) => ({ id: o.id, item: o.item, unitPrice: o.unitPrice, quantity: o.quantity, seller: o.seller, ts: now }));
+    marketStore.appendHistory(observations, historyPath);
+    const history = marketStore.loadHistory(historyPath, now);
+
+    const summary = buildMarketSummary({ offersByItem, names, history, now, dealRatio });
+    await marketStore.saveSummary(summary, summaryPath);
+
+    const notified = notify ? await notifyNewDeals(summary.deals) : 0;
+    log.info(`Targ: ${Object.keys(offersByItem).length}/${items.length} przedmiotów, ${observations.length} ofert` +
+      (summary.deals.length ? `, okazje: ${summary.deals.length} (nowe zgłoszone: ${notified})` : ''));
+    return { ok: true, catalog: catalog.length, summary };
   } catch (e) {
     log.warn('Targ: odczyt nieudany', { error: String(e) });
     return { ok: false, error: String(e) };
@@ -128,7 +163,8 @@ async function runMarketScanIfDue(page, now = Date.now()) {
     const watch = Array.isArray(cfg.marketWatchItems) && cfg.marketWatchItems.length
       ? cfg.marketWatchItems
       : DEFAULT_WATCH;
-    return await ScanMarket(page.context(), { watch });
+    const ratio = Number(cfg.marketDealRatio);
+    return await ScanMarket(page.context(), { watch, dealRatio: ratio > 0 && ratio < 1 ? ratio : 0.7 });
   } finally {
     scanning = false;
   }

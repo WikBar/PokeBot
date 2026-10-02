@@ -30,3 +30,24 @@ test('parseCatalog: kod, nazwa z <br>, numer zakladki, href bez &amp;', () => {
 test('parseCatalog: brak katalogu - pusta lista', () => {
   assert.deepEqual(parseCatalog('<html><body>Logowanie</body></html>'), []);
 });
+
+const { parseItemOffers } = require('../src/logic/marketParse');
+const offersHtml = fs.readFileSync(path.join(__dirname, 'fixtures', 'market-offers-rawst.html'), 'utf8');
+
+test('parseItemOffers: oferty Rawst (prawdziwa strona, sprzedawcy zanonimizowani)', () => {
+  const offers = parseItemOffers(offersHtml);
+  assert.equal(offers.length, 16);
+  assert.deepEqual(offers[0], {
+    id: 3961166, item: 'rawst_berry', quantity: 3569, unitPrice: 30000, meritPrice: null, seller: 'Gracz1',
+  });
+  // Oferty tylko za zaslugi (§) - bez ceny w Yenach.
+  const merit = offers.filter((o) => o.unitPrice === null);
+  assert.equal(merit.length, 6);
+  assert.ok(merit.every((o) => o.meritPrice > 0));
+  assert.equal(offers.find((o) => o.unitPrice === 100000).quantity, 43);
+});
+
+test('parseItemOffers: strona bez ofert - null, pusta lista ofert - []', () => {
+  assert.equal(parseItemOffers('<html>Logowanie</html>'), null);
+  assert.deepEqual(parseItemOffers('<h2>Oferty</h2><div id="targ_prz_oferty"></div>'), []);
+});

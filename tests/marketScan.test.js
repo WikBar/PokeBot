@@ -7,33 +7,22 @@ const http = require('http');
 const { chromium } = require('playwright');
 const { ScanMarket } = require('../src/actions/market');
 
-// Atrapa gry: menu "Targ", katalog z zakladkami jak na prawdziwej stronie
-// i strona ofert. Skrypt gry laduje href przycisku btn-akcja - tu robimy to
-// prostym przekierowaniem.
+// Atrapa gry: menu "Targ", katalog (wycinek prawdziwej strony) i strona
+// ofert (prawdziwe oferty Rawst, zanonimizowane) pod gra/targ_prz.php.
+const fixture = (f) => fs.readFileSync(path.join(__dirname, 'fixtures', f), 'utf8');
 const MENU = `
   <a class="dropdown-toggle" href="#">Targ</a>
   <ul class="dropdown-menu"><li><a href="/targ">Kup - Przedmioty</a></li></ul>`;
-const CATALOG = fs.readFileSync(path.join(__dirname, 'fixtures', 'market-catalog.html'), 'utf8');
-const SCRIPT = `<script>
-  document.addEventListener('click', (e) => {
-    const t = e.target.closest('a[href^="#targ_kupprz-"]');
-    if (t) {
-      e.preventDefault();
-      document.querySelectorAll('.tab-pane').forEach((p) => { p.style.display = 'none'; });
-      document.querySelector(t.getAttribute('href')).style.display = 'block';
-    }
-    const b = e.target.closest('button.btn-akcja');
-    if (b) location.href = '/' + b.getAttribute('href');
-  });
-</script><style>.tab-pane{display:none}.tab-pane.active{display:block}</style>`;
 const PAGES = {
   '/index.php': `<html><body>${MENU}<div id="timer">Pomagasz w PokeCentrum 00:30:00</div></body></html>`,
-  '/targ': `<html><body>${MENU}${CATALOG}${SCRIPT}</body></html>`,
-  '/targ_prz.php': `<html><body>${MENU}<table id="oferty"><tr><td>Ultraballe</td><td>123</td></tr></table></body></html>`,
+  '/targ': `<html><body>${MENU}${fixture('market-catalog.html')}</body></html>`,
+  '/gra/targ_prz.php': fixture('market-offers-rawst.html'),
 };
 
-test('ScanMarket: katalog, oferty obserwowanych przedmiotow, glowna karta nietknieta', async () => {
+test('ScanMarket: katalog, oferty przez fetch, historia, podsumowanie; glowna karta nietknieta', async () => {
+  const requests = [];
   const server = http.createServer((req, res) => {
+    requests.push(req.url);
     const page = PAGES[req.url.split('?')[0]];
     res.writeHead(page ? 200 : 404, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(page || 'brak');
@@ -47,24 +36,34 @@ test('ScanMarket: katalog, oferty obserwowanych przedmiotow, glowna karta nietkn
     const main = await context.newPage();
     await main.goto(`${base}/index.php`);
 
-    const result = await ScanMarket(context, {
+    const opts = {
       url: `${base}/index.php`,
       snapshotDir: dir,
       catalogPath: path.join(dir, 'catalog.json'),
-      watch: ['ultraballe', 'rawst_berry', 'nie_ma_takiego'],
-    });
+      historyPath: path.join(dir, 'history.jsonl'),
+      summaryPath: path.join(dir, 'summary.json'),
+      watch: ['rawst_berry', 'nie_ma_takiego'],
+      notify: false,
+    };
+    const result = await ScanMarket(context, opts);
     assert.equal(result.ok, true);
     assert.equal(result.catalog, 103);
-    assert.deepEqual(result.results.map((r) => [r.item, r.offers]), [['rawst_berry', null], ['ultraballe', null]]);
+    assert.ok(requests.some((u) => u.startsWith('/gra/targ_prz.php?szukaj&przedmiot=rawst_berry&zakladka=0')));
+
+    const rawst = result.summary.items.find((i) => i.code === 'rawst_berry');
+    assert.equal(rawst.name, 'Rawst Jagody');
+    assert.equal(rawst.offers, 16);
+    assert.equal(rawst.lowest, 30000);
+    assert.equal(rawst.historyOffers, 10);   // 10 ofert w ¥, 6 tylko za zaslugi
+
+    // Drugi odczyt tych samych ofert nie dubluje historii w statystykach.
+    const again = await ScanMarket(context, opts);
+    assert.equal(again.summary.items[0].historyOffers, 10);
+    assert.equal(fs.readFileSync(opts.historyPath, 'utf8').trim().split('\n').length, 20);
 
     // Glowna karta dalej na stronie z timerem opieki, karta targu zamknieta.
     assert.equal(await main.locator('#timer').count(), 1);
     assert.equal(context.pages().length, 1);
-
-    const files = fs.readdirSync(dir).sort();
-    assert.ok(files.includes('catalog.json'));
-    const ultra = files.find((f) => f.startsWith('oferty-ultraballe-'));
-    assert.match(fs.readFileSync(path.join(dir, ultra), 'utf8'), /<td>123<\/td>/);
   } finally {
     await browser.close();
     server.close();
@@ -76,7 +75,7 @@ test('ScanMarket: blad strony nie rzuca wyjatku', async () => {
   const browser = await chromium.launch();
   try {
     const context = await browser.newContext();
-    const r = await ScanMarket(context, { url: 'http://127.0.0.1:1/nie-ma', snapshotDir: os.tmpdir() });
+    const r = await ScanMarket(context, { url: 'http://127.0.0.1:1/nie-ma', snapshotDir: os.tmpdir(), notify: false });
     assert.equal(r.ok, false);
     assert.equal(context.pages().length, 0);
   } finally {

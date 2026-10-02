@@ -30,6 +30,7 @@ const NUMBER_RULES = [
   ['adventureDelay', 300, Infinity, false, false],
   ['shinyHuntTries', 1, Infinity, true, false],
   ['marketScanMinutes', 15, Infinity, false, false],
+  ['marketDealRatio', 0.05, 0.99, false, false],
 ];
 
 const BOOL_KEYS = [

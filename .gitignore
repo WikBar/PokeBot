@@ -8,3 +8,5 @@ config/*.tmp
 config/runtime-state.json
 config/shiny-stats.json
 config/market-catalog.json
+config/market-history.jsonl
+config/market-summary.json

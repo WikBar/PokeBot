@@ -8,6 +8,7 @@ const COMMANDS = {
   hospital: ['/szpital', '/hospital'],
   shiny: ['/shiny'],
   report: ['/raport', '/report'],
+  market: ['/targ', '/market'],
   help: ['/pomoc', '/help', '/start'],
 };
 
@@ -31,6 +32,7 @@ const HELP = [
   '/szpital - idź do Centrum Pokemon',
   '/shiny - stan polowania i najlepsze lokacje',
   '/raport - anomalie z logów (24 h)',
+  '/targ - ceny na targu, okazje, sugerowane ceny sprzedaży',
 ].join('\n');
 
 const minutesAgo = (iso, now) => {
@@ -81,4 +83,25 @@ function formatReport({ findings, stats }) {
   return [head, ...findings.slice(0, 10).map((f) => `- ${f.message}`)].join('\n');
 }
 
-module.exports = { COMMANDS, HELP, parseCommand, formatStatus, formatShiny, formatReport };
+const yen = (n) => (n == null ? '-' : `${Number(n).toLocaleString('pl-PL')} ¥`);
+
+// summary: config/market-summary.json (logic/market.buildMarketSummary)
+function formatMarket(summary, now = Date.now()) {
+  if (!summary?.items?.length) return 'Brak danych z targu - bot zagląda tam podczas treningu i opieki.';
+  const ago = Math.round((now - Date.parse(summary.updatedAt)) / 60000);
+  const lines = [`Targ (odczyt ${ago} min temu):`];
+  for (const i of summary.items) {
+    const trend = i.trend ? `, trend ${Math.round(i.trend * 100)}%` : '';
+    lines.push(`${i.name}: od ${yen(i.lowest)} (${i.offers} ofert), mediana ${yen(i.median)}${trend}`);
+    if (i.suggestedSell) lines.push(`  sprzedaj za ${yen(i.suggestedSell.price)}`);
+  }
+  if (summary.deals?.length) {
+    lines.push('Okazje:');
+    for (const d of summary.deals.slice(0, 5)) {
+      lines.push(`- ${d.name}: ${yen(d.offer.unitPrice)} × ${d.offer.quantity} (${Math.round(d.ratio * 100)}% mediany)`);
+    }
+  }
+  return lines.join('\n');
+}
+
+module.exports = { COMMANDS, HELP, parseCommand, formatStatus, formatShiny, formatReport, formatMarket };

@@ -9,6 +9,8 @@ const { REPEL_ITEM_NAMES } = require('./actions/equipment');
 const { validateConfig } = require('./validation/config');
 const { loadJson, RUNTIME_PATH, SHINY_STATS_PATH } = require('./utils/runtimeStore');
 const { summarize } = require('./logic/shinyStats');
+const { SUMMARY_PATH } = require('./utils/marketStore');
+const CATALOG_PATH = path.resolve(__dirname, '..', 'config', 'market-catalog.json');
 
 const log = logger.child({ module: 'server' });
 
@@ -24,7 +26,7 @@ const ALLOWED_CONFIG_KEYS = new Set([
   'autoRepelEnabled', 'autoRepelKind', 'autoRepelTier', 'autoRepelMin',
   'saveSafariBall', 'activityMode', 'adventureDelay',
   'shinyHunt', 'shinyHuntTries', 'skippedAdventures', 'strongBallPokemons',
-  'marketScanEnabled', 'marketScanMinutes', 'marketWatchItems',
+  'marketScanEnabled', 'marketScanMinutes', 'marketWatchItems', 'marketDealRatio',
   'diff3CatchPokemons', 'diff4CatchPokemons', 'diff5CatchPokemons', 'diff0CatchPokemons'
 ]);
 
@@ -45,6 +47,7 @@ function createApp({ paths = {}, apiKey = process.env.API_KEY || null } = {}) {
   const P = {
     config: CONFIG_PATH, daily: DAILY_PATH, team: TEAM_PATH, locations: LOCATIONS_PATH,
     runtime: RUNTIME_PATH, shinyStats: SHINY_STATS_PATH,
+    marketSummary: SUMMARY_PATH, marketCatalog: CATALOG_PATH,
     ...paths,
   };
   const app = express();
@@ -134,6 +137,15 @@ function createApp({ paths = {}, apiKey = process.env.API_KEY || null } = {}) {
       region,
       runtime,
       locations: summarize(stats, region),
+    });
+  });
+
+  // Targ: ostatnie podsumowanie (ceny, okazje, sugerowane ceny sprzedazy)
+  // i katalog kodow przedmiotow do marketWatchItems.
+  app.get('/api/market', (req, res) => {
+    res.json({
+      summary: loadJson(P.marketSummary),
+      catalog: loadJson(P.marketCatalog)?.items || [],
     });
   });
 
