@@ -3,6 +3,7 @@ const path = require('path');
 const { logger } = require('./utils/logger');
 const botState = require('./state');
 const { CheckPA } = require('./actions/stats');
+const { runMarketScanIfDue } = require('./actions/market');
 
 const log = logger.child({ module: 'dailyActions' });
 
@@ -283,15 +284,21 @@ async function waitForCareTimer(page) {
     const remainingMs = (parseInt(match[1]) * 3600 + parseInt(match[2]) * 60 + parseInt(match[3])) * 1000;
     log.info(`Opieka: timer ${match[0]} - pozostało ${remainingMs}ms.`);
 
+    // Czas czekania wykorzystujemy na odczyt targu (osobna karta - ta
+    // zostaje na timerze opieki). Czas odczytu odejmujemy od czekania.
+    const scanStart = Date.now();
+    await runMarketScanIfDue(page);
+    const scanMs = Date.now() - scanStart;
+
     if (remainingMs <= STAY_THRESHOLD_MS) {
       log.info(`Opieka: zostało < 12 min - czekam na miejscu ${remainingMs}ms.`);
-      await page.waitForTimeout(remainingMs + 5000);
+      await page.waitForTimeout(Math.max(0, remainingMs - scanMs) + 5000);
       log.info('Opieka: timer zakończony.');
       return true;
     }
 
     log.info(`Opieka: zostało > 12 min - odświeżam za 12 min.`);
-    await page.waitForTimeout(POLL_INTERVAL_MS);
+    await page.waitForTimeout(Math.max(0, POLL_INTERVAL_MS - scanMs));
     await page.reload();
     try { await page.waitForLoadState('networkidle', { timeout: 10000 }); } catch { /* ignore */ }
 

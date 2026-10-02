@@ -17,6 +17,7 @@ const { acquireLock, releaseLock } = require('./utils/instanceLock');
 const { validateConfig, validateLocations } = require('./validation/config');
 const { startServer } = require('./server');
 const { startTelegramCommands } = require('./utils/telegramBot');
+const { runMarketScanIfDue } = require('./actions/market');
 const state = require('./state');
 const { isSpecialLocationDay, pickNextLocation } = require('./logic/locations');
 const { createShinyState, maxTriesFrom, shinyStep } = require('./logic/shiny');
@@ -666,7 +667,12 @@ while (true){
     let lastDailyCheckHour = -1;
     let lastDailyCheckKey = null;
     for (let i = 0; i < REGEN_ITERATIONS; i++){
-        await page.waitForTimeout(REGEN_WAIT_MINUTES * 60 * 1000);
+        // Bot czeka w treningu/pracy - czas wykorzystujemy na odczyt targu
+        // (osobna karta, nie czesciej niz marketScanMinutes). Czas odczytu
+        // odejmujemy od czekania, zeby cykl PA sie nie wydluzal.
+        const scanStart = Date.now();
+        await runMarketScanIfDue(page);
+        await page.waitForTimeout(Math.max(0, REGEN_WAIT_MINUTES * 60 * 1000 - (Date.now() - scanStart)));
         await page.reload();
         log.info("Odnowienie PA", {
           time: new Date().toLocaleTimeString(),

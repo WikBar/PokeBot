@@ -29,10 +29,12 @@ const NUMBER_RULES = [
   ['autoRepelMin', 0, Infinity, false, false],
   ['adventureDelay', 300, Infinity, false, false],
   ['shinyHuntTries', 1, Infinity, true, false],
+  ['marketScanMinutes', 15, Infinity, false, false],
 ];
 
 const BOOL_KEYS = [
   'randomAdventure', 'limitsEnabled', 'autoRepelEnabled', 'saveSafariBall', 'shinyHunt',
+  'marketScanEnabled',
 ];
 
 const ENUM_RULES = [
